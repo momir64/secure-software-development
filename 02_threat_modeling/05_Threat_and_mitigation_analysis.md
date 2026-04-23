@@ -90,3 +90,58 @@ Information disclosure involves the exposure of sensitive data to unauthorised p
 
 - **Mitigation:** The system minimizes the inclusion of personal data in notification payloads by replacing full details with secure, authenticated links that direct users back to the MegaTravel portal. Communication with providers is strictly enforced over TLS, and all outgoing content is stripped of sensitive financial data, such as partial card numbers. Furthermore, data security is governed by rigorous Data Processing Agreements (DPA) to ensure GDPR compliance, while automated redaction logic is applied to ensure that only the essential information required for the notification is ever processed by external services.
 
+## Denial of Service
+
+Denial of Service involves making a system unavailable to legitimate users.
+
+### DoS Attack on the Web APP via Client Interfaces
+
+- **Description:** An attacker targets the Web APP with a massive volume of requests from web and mobile interfaces to exhaust CPU, memory, and connection pools. This flood of traffic aims to saturate the server's capacity, causing significant latency or total service outages for legitimate MegaTravel customers attempting to book services.
+
+- **Mitigation:** Protection is managed through a WAF and dedicated DDoS mitigation services (e.g., Cloudflare or AWS Shield) to filter malicious traffic at the edge. The system enforces per-IP and per-user rate limiting, combined with auto-scaling infrastructure to dynamically absorb legitimate traffic spikes. High-frequency unauthenticated requests are further challenged by connection limits and CAPTCHA to ensure resources remain available for genuine users.
+
+### Resource Exhaustion via Automated Authentication Attacks
+
+- **Description:** An attacker targets the internal Auth Processor by flooding the Web App’s login endpoints with credential stuffing or brute-force attempts. Although the processor is internal, the high volume of forwarded requests can exhaust its processing threads and database lookup capacity. This creates a bottleneck that delays or blocks legitimate users from logging in, effectively causing a denial of service for all authenticated MegaTravel services.
+
+- **Mitigation:** The system enforces rate limiting and bot detection at the API Gateway to filter automated traffic before it reaches the internal network. Security is further hardened through account lockout policies, progressive delays for failed attempts, and mandatory CAPTCHAs for suspicious login patterns. To protect the internal processor's availability, MFA is integrated to reduce the impact of stolen credentials, while real-time threat intelligence feeds are used to block known malicious IPs at the perimeter.
+
+### Cascading Failure via External Provider Unavailability
+
+- **Description:** The unavailability of external third-party APIs (Transportation, Tour, or Accommodation providers) due to outages or DoS attacks can trigger a cascading failure within the MegaTravel ecosystem. If the Web APP handles these external dependencies synchronously, a slow or unresponsive provider can tie up internal server threads, leading to a total hang of the booking engine and preventing users from completing travel arrangements even for unaffected services.
+
+- **Mitigation:** The architecture incorporates circuit breakers and fallback strategies to instantly isolate failing providers and maintain overall system responsiveness. To enable degraded-mode operation, critical provider data such as pricing and availability is cached with optimized TTLs, allowing for limited browsing during provider downtime. Furthermore, the booking flow is designed as an asynchronous process using request queuing, while continuous health check monitoring ensures that the system can automatically reroute or alert when a provider’s SLA (Service Level Agreement) is violated.
+
+## Elevation of Privilege
+
+Elevation of privilege involves an actor gaining more access or capabilities than authorised.
+
+### Administrative Privilege Escalation via Client Interface
+
+- **Description:** An attacker attempts to gain unauthorized access to administrative functions by manipulating requests sent from the Web or Mobile Client. By exploiting vulnerabilities such as Broken Object Level Authorization (BOLA) or parameter tampering, the user seeks to bypass client-side restrictions to view global booking data, modify other users' reservations, or access sensitive configuration panels. This threat relies on the Web APP failing to properly validate the user's authority before executing high-privilege operations on their behalf.
+
+- **Mitigation:** The system enforces strict server-side authorization checks on every endpoint, ensuring that no client-supplied role or permission claim is ever trusted. A robust Role-Based Access Control (RBAC) model is implemented to segregate duties between end-users, support agents, and administrators. Security resilience is maintained through regular OWASP-aligned testing for Insecure Direct Object References (IDOR) and mandatory code reviews for all authorization logic to prevent logic flaws from reaching production.
+
+### Cross-Provider Data Access and Scope Breach
+
+- **Description:** An authenticated third-party provider (Transportation, Tour, or Accommodation) attempts to access data outside its authorized domain, such as bookings from competing providers or general customer profiles. This threat involves exploiting weak authorization logic or predictable resource identifiers to "break out" of the assigned data scope. If successful, a provider could gain an unfair competitive advantage or expose sensitive PII belonging to users who have not even booked their specific services.
+
+- **Mitigation:** The architecture enforces strict data isolation at the access layer, utilizing OAuth 2.0 scopes to ensure API credentials are tied to specific, limited permissions. Every data request is validated against a multi-tenant isolation policy, ensuring that queries only return records belonging to the authenticated provider. Furthermore, the system continuously audits access patterns and triggers immediate alerts upon any attempt to query cross-provider resources, preventing lateral movement within the MegaTravel data ecosystem.
+
+### Internal Privilege Escalation via Role Misconfiguration
+
+- **Description:** An internal user attempts to bypass their assigned access boundaries to reach data or functions designated for a different organizational role. This threat involves exploiting logic vulnerabilities or misconfigured Role-Based Access Control (RBAC) to perform actions outside the user's defined scope. If successful, an employee could manipulate records, access sensitive PII, or execute business processes they are not authorized to handle, leading to data breaches or internal fraud.
+
+- **Mitigation:** The platform enforces strict role separation based on the Principle of Least Privilege (PoLP), ensuring each role is cryptographically and logically restricted to its specific functional domain. Granular access control policies are implemented to prevent cross-role data leakage, while periodic access reviews ensure privileges remain aligned with current job responsibilities. All attempts to access resources outside of a user’s assigned scope are logged and trigger automated alerts, allowing the security team to detect and mitigate unauthorized internal movements in real-time.
+
+### Full System Compromise via Administrator Credential Theft
+
+- **Description:** An attacker targets the System Administrator role to gain the highest level of system-wide access. By successfully executing phishing attacks or exploiting credential reuse, the attacker can bypass standard security barriers to modify global configurations, access all sensitive databases, and disable active security controls. This represents a "root-level" threat, where a single compromised account provides the attacker with the ability to persistently control the entire MegaTravel infrastructure and potentially erase traces of their activity.
+
+- **Mitigation:** The system mandates Multi-Factor Authentication (MFA) for all administrative accounts, prioritizing hardware tokens or passkeys to neutralize phishing risks. Privileged access is managed through Just-In-Time (JIT) protocols and Privileged Access Management (PAM) tools, which grant rights on-demand for limited windows with mandatory session recording. Furthermore, administrative duties are strictly performed from Privileged Access Workstations (PAW), while real-time alerting is triggered for any high-level action in production to ensure immediate visibility into administrative maneuvers.
+
+### Database Privilege Escalation via SQL Injection
+
+- **Description:** An attacker attempts to inject malicious SQL commands through unvalidated input fields in the Web APP or associated APIs. By exploiting these injection points, the attacker seeks to bypass application-level logic and execute arbitrary queries directly against the database. The ultimate goal is to escalate from standard application permissions to DBA-level access, enabling the unauthorized extraction of sensitive credentials, modification of payment records, or the complete destruction of data across the environment.
+
+- **Mitigation:** The system implements parameterized queries and rigorous input validation to prevent SQL injection vulnerabilities. Additionally, the database is configured with the principle of least privilege, ensuring that the application has only the necessary permissions to perform its functions. Regular security audits and penetration testing are conducted to identify and remediate any potential injection points before they can be exploited.
