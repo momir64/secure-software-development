@@ -6,7 +6,8 @@
 
 - I assumed that whatever I leave will be displayed as I sent it, so for the comment body i put:
   
-  ```<script>alert("oh no")</script>
+  ```
+  <script>alert("oh no")</script>
   ```
 
 For the name, email and website I just made sure that they were in the appropriate format. Upon clicking post comment the alert showed and lab was completed. 
