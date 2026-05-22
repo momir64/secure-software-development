@@ -1,15 +1,11 @@
-FROM debian/eol:squeeze-slim
+FROM debian:bullseye-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN echo "deb http://archive.debian.org/debian/ squeeze main contrib non-free" > /etc/apt/sources.list && \
-    echo "deb-src http://archive.debian.org/debian/ squeeze main contrib non-free" >> /etc/apt/sources.list && \
-    echo "Acquire::Check-Valid-Until false;" > /etc/apt/apt.conf.d/99no-check-valid-until
-
-RUN apt-get update && apt-get install -y --force-yes \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     procps \
     net-tools \
-    iproute \
+    iproute2 \
     iptables \
     iputils-ping \
     dnsutils \

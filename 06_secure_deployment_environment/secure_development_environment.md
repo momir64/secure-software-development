@@ -26,7 +26,7 @@ The tool is designed to run within a controlled environment (Docker) to ensure c
    Execute the container with administrative privileges (NET_ADMIN) to allow the tool to inspect firewall rules.
 
     ```bash
-    docker run --rm --cap-add=NET_ADMIN debian-security-audit  
+   docker run --rm --cap-add=NET_ADMIN secure-audit:latest
     ```
 
 3. Review Results:
