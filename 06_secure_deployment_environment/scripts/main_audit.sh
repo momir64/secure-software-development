@@ -13,11 +13,15 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # Execution of modules
-chmod +x system_review.sh network_review.sh
+chmod +x system_review.sh network_review.sh filesystem_review.sh users_review.sh
 
 ./system_review.sh
 echo -e "\n"
 ./network_review.sh
+echo -e "\n"
+./filesystem_review.sh
+echo -e "\n"
+./users_review.sh
 
 echo "===================================================="
 echo -e "${GREEN}Audit completed.${NC}"

@@ -16,7 +16,9 @@ WORKDIR /app
 COPY main_audit.sh .
 COPY system_review.sh .
 COPY network_review.sh .
+COPY filesystem_review.sh .
+COPY users_review.sh .
 
-RUN chmod +x *.sh
+RUN sed -i 's/\r$//' *.sh && chmod +x *.sh
 
 ENTRYPOINT ["./main_audit.sh"]
