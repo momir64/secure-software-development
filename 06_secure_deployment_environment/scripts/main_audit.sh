@@ -12,8 +12,18 @@ if [[ $EUID -ne 0 ]]; then
    exit 1
 fi
 
+# Start services if running inside Docker
+if [ -f /.dockerenv ]; then
+    echo -e "${GREEN}Docker environment detected. Initializing services...${NC}\n"
+    mysql_install_db --user=mysql --datadir=/var/lib/mysql > /dev/null 2>&1
+    service mariadb start > /dev/null 2>&1
+    mkdir -p /run/sshd
+    service ssh start > /dev/null 2>&1
+    service apache2 start > /dev/null 2>&1
+fi
+
 # Execution of modules
-chmod +x system_review.sh network_review.sh filesystem_review.sh users_review.sh
+chmod +x system_review.sh network_review.sh filesystem_review.sh users_review.sh services_review.sh
 
 ./system_review.sh
 echo -e "\n"
@@ -22,6 +32,8 @@ echo -e "\n"
 ./filesystem_review.sh
 echo -e "\n"
 ./users_review.sh
+echo -e "\n"
+./services_review.sh
 
 echo "===================================================="
 echo -e "${GREEN}Audit completed.${NC}"

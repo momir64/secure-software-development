@@ -6,9 +6,14 @@ This directory is a modular security auditing suite. The tool automates the revi
 
 ## Project Structure
 
-- main_audit.sh: The master orchestrator script that triggers all sub-scripts and aggregates results.
+- main_audit.sh: The master orchestrator script that triggers all sub-scripts and aggregates results. When running inside Docker, it also initializes and starts all services before the audit begins.
 - system_review.sh: Detailed audit of OS, logging, and time services. Details could be found in the [system_review.md file](./system_review.md).
 - network_review.sh: Audit of firewall rules, DNS, and network protocols. Details could be found in the [network_review.md file](./network_review.md).
+- filesystem_review.sh: Audit of mount options, sensitive file permissions, SETUID binaries, and backup exposure. Details could be found in the [filesystem_review.md file](./filesystem_review.md).
+- users_review.sh: Audit of user accounts, password policies, sudo rules, and SSH access controls. Details could be found in the [users_review.md file](./users_review.md).
+- services_review.sh: Audit of running processes, listening services, and daemon configurations (SSH, MySQL, Apache, PHP, Nginx, cron). Details could be found in the [services_review.md file](./services_review.md).
+
+
 
 ## How to Run
 
