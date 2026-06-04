@@ -1,0 +1,30 @@
+[
+  {
+    "source_name": ["$username"],
+    "source_line": [9],
+    "source_column": [219],
+    "source_file": ["\/workspace\/forgotusername.php"],
+    "sink_name": "pg_query",
+    "sink_line": 12,
+    "sink_column": 311,
+    "sink_file": "\/workspace\/forgotusername.php",
+    "vuln_name": "sql_injection",
+    "vuln_cwe": "CWE_89",
+    "vuln_id": "2b23136e94bac002cf0463d4d4cc542ebff3606cd8ec7b0ec0380f5b292924d9",
+    "vuln_type": "taint-style"
+  },
+  {
+    "source_name": ["$_GET[\"token\"]"],
+    "source_line": [77],
+    "source_column": [2766],
+    "source_file": ["\/workspace\/resetpassword.php"],
+    "sink_name": "echo",
+    "sink_line": 77,
+    "sink_column": 2766,
+    "sink_file": "\/workspace\/resetpassword.php",
+    "vuln_name": "xss",
+    "vuln_cwe": "CWE_79",
+    "vuln_id": "d0adfe74035dd960628ccbe2a1f858038b5203291ce0ac943e61ce9ade57042b",
+    "vuln_type": "taint-style"
+  }
+]
