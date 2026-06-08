@@ -53,6 +53,10 @@ Login bypass vulnerabilities allow attackers to gain unauthorized access to an a
 
 ### 2. Admin Privilege Escalation
 
+Privilege escalation vulnerabilities allow attackers to gain elevated access within an application beyond what is intended for their account. In the case of TUDO, we identified a XSS vulnerability that allows a regular authenticated user to steal the administrator's session cookie. Because a cronjob simulates the admin logging in and visiting the homepage every minute, this can be exploited reliably without any direct interaction from the admin.
+
+[**Instructions**](privilege_escalation/INSTRUCTIONS.md) show how to exploit this vulnerability and gain unauthorized access to the admin account.
+
 ### 3. Remote Code Execution (RCE)
 
 ## Full Exploitation Script

@@ -1,0 +1,16 @@
+[
+  {
+    "source_name": ["$row[3]"],
+    "source_line": [30],
+    "source_column": [1097],
+    "source_file": ["\/workspace\/index.php"],
+    "sink_name": "echo",
+    "sink_line": 30,
+    "sink_column": 1090,
+    "sink_file": "\/workspace\/index.php",
+    "vuln_name": "xss",
+    "vuln_cwe": "CWE_79",
+    "vuln_id": "070c93e86e07ebf463b8cd7dd28a75d968acce46443bb492f214c5a5def6c428",
+    "vuln_type": "taint-style"
+  }
+]
