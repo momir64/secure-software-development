@@ -18,7 +18,7 @@ sudo bash firecracker/snapshot.sh
 ```
 
 - `setup.sh` reads `config/vm.toml` for resource limits, installs Firecracker + Jailer, downloads the CI kernel, builds `resources/rootfs.ext4`, and configures KVM permissions
-- `test.sh` boots a test MicroVM with `init=/bin/sh` so you can verify the full stack interactively — type `reboot` to exit
+- `test.sh` boots a test MicroVM with `init=/bin/sh` so you can verify the full stack interactively — type `exit` to exit
 - `snapshot.sh` rebuilds `rootfs.ext4` and takes a full memory snapshot of a booted runner, storing it in `resources/snapshot/`
 
 > **Note:** After `setup.sh`, run `newgrp kvm` or log out and back in for the `kvm` group membership to take effect before running the other scripts.
@@ -369,7 +369,7 @@ sudo jailer \
     --config-file vm-config.json
 ```
 
-You should see the Alpine Linux boot sequence in the terminal. You can run `reboot` inside the MicroVM to shut it down.
+You should see the Alpine Linux boot sequence in the terminal. You can run `exit` inside the MicroVM to shut it down.
 
 Clean up after the test:
 ```bash
