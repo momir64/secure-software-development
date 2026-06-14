@@ -1,0 +1,8 @@
+[vm]
+vcpu_count = 1
+memory_mib = 128
+idle_timeout_seconds = 300
+handler_timeout_seconds = 30
+
+[rootfs]
+disk_size_mib = 512
