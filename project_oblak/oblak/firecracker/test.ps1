@@ -1,4 +1,4 @@
-# firecracker/test.ps1
+﻿# firecracker/test.ps1
 # Run from the oblak/ directory: .\firecracker\test.ps1
 
 param([string]$OblakPath = "")

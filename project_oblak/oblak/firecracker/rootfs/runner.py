@@ -9,8 +9,7 @@ import sys
 import io
 import os
 
-TCP_PORT = 8080
-
+VSOCK_PORT = 8080
 
 def _recv_exact(conn: socket.socket, n: int) -> bytes:
     buf = bytearray()
@@ -62,6 +61,28 @@ def _capture_stderr():
         os.close(r)
 
 
+def _handle_setup(payload: dict) -> dict:
+    errors = []
+    env_dev = payload.get("env_dev")
+    if env_dev:
+        if os.system(f"mount -o ro {env_dev} /env") != 0:
+            errors.append(f"failed to mount env {env_dev}")
+    task_dev = payload.get("task_dev")
+    if task_dev:
+        if os.system(f"mount -o ro {task_dev} /var/task") != 0:
+            errors.append(f"failed to mount task {task_dev}")
+    net = payload.get("network")
+    if net:
+        os.system("ip addr flush dev eth0")
+        os.system("ip route flush dev eth0")
+        os.system(f"ip addr add {net['guest_ip']}/{net['prefix']} dev eth0")
+        os.system("ip link set eth0 up")
+        os.system(f"ip route add default via {net['gateway']}")
+    if errors:
+        return {"status": "error", "errors": errors}
+    return {"status": "ok"}
+
+
 def _handle(payload: dict) -> dict:
     script = payload.get("script", "")
     input_str = payload.get("input", "")
@@ -84,17 +105,29 @@ def _handle(payload: dict) -> dict:
     return {"output": output, "stderr": stderr_buf.getvalue(), "exit_code": exit_code}
 
 
+def _setup_mounts() -> None:
+    if os.system("mount -t tmpfs tmpfs /tmp") != 0:
+        print("Failed to mount tmpfs at /tmp", flush=True)
+        sys.exit(1)
+    os.system("mount -t proc proc /proc")
+
+
 def main() -> None:
+    _setup_mounts()
     try:
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind(("", TCP_PORT))
+        server.bind((socket.VMADDR_CID_ANY, VSOCK_PORT))
         server.listen(1)
         while True:
             conn, _ = server.accept()
             try:
                 while True:
-                    _send_msg(conn, _handle(_recv_msg(conn)))
+                    msg = _recv_msg(conn)
+                    if msg.get("type") == "setup":
+                        _send_msg(conn, _handle_setup(msg))
+                    else:
+                        _send_msg(conn, _handle(msg))
             except (ConnectionError, OSError):
                 pass
             finally:
