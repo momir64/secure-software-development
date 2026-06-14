@@ -1,0 +1,5 @@
+.idea
+
+# Oblak MicroVMs resource files
+*/resources/*
+!**/.gitkeep
