@@ -2,6 +2,7 @@ import ast
 import hashlib
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +24,7 @@ except ImportError:
 try:
     import bandit.core.config as _b_config
     import bandit.core.manager as _b_manager
+    import tempfile
     _BANDIT_AVAILABLE = True
 except ImportError:
     _BANDIT_AVAILABLE = False
@@ -84,6 +86,13 @@ class AnalysisReport:
 # File validation ==============================================
 def _check_file_type(code_bytes: bytes) -> CheckResult:
     # Empty file is not valid Python
+    if not code_bytes or len(code_bytes.strip()) == 0:
+        return CheckResult(
+            name="File validation",
+            status="fail",
+            description="Input is empty, nothing to analyze or execute.",
+        )
+    
     if b"\x00" in code_bytes:
         return CheckResult(
             name="File validation",
@@ -124,15 +133,18 @@ def _check_file_type(code_bytes: bytes) -> CheckResult:
 # Antivirus (YARA) =====================================
 
 _YARA_COMPILED: "_yara.Rules | None" = None
+_YARA_LOCK = threading.Lock()
 
 def _get_yara_rules() -> "_yara.Rules":
     global _YARA_COMPILED
     if _YARA_COMPILED is None:
-        rules_path = Path(__file__).parent / "resources" / "antivirus" / "rules.yar"
-        if not rules_path.exists():
-            raise FileNotFoundError(f"YARA rules file missing at: {rules_path}")
-        
-        _YARA_COMPILED = _yara.compile(filepath=str(rules_path))
+        with _YARA_LOCK:
+            if _YARA_COMPILED is None:
+                rules_path = Path(__file__).parent / "config" / "antivirus" / "rules.yar"
+                if not rules_path.exists():
+                    raise FileNotFoundError(f"YARA rules file missing at: {rules_path}")
+                
+                _YARA_COMPILED = _yara.compile(filepath=str(rules_path))                
     return _YARA_COMPILED
 
 
@@ -252,8 +264,6 @@ def _run_bandit(source: str) -> list[str]:
     if not _BANDIT_AVAILABLE:
         return []
 
-    import tempfile, os
-
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False, mode="w", encoding="utf-8") as tf:
         tf.write(source)
         tmp_path = tf.name
@@ -338,7 +348,7 @@ def _check_llm(code_bytes: bytes) -> CheckResult:
             ),
         )
     
-    prompt_path = Path(__file__).parent / "resources" / "prompts" / "llm_analyst.txt"
+    prompt_path = Path(__file__).parent / "config" / "prompts" / "llm_analyst.txt"
     if not prompt_path.exists():
         return CheckResult(
             name="LLM analysis (Claude)",
@@ -461,13 +471,32 @@ def _aggregate(checks: list[CheckResult]) -> tuple[bool, str, str]:
 
 def analyze(code_bytes: bytes) -> dict:
     start = time.monotonic()
+    checks = []
 
-    checks = [
-        _check_file_type(code_bytes),
+    file_check = _check_file_type(code_bytes)
+    checks.append(file_check)
+
+    if file_check.status == "fail":
+        safe, confidence, summary = _aggregate(checks)
+        
+        report = AnalysisReport(
+            safe=safe,
+            confidence=confidence,
+            summary=summary,
+            checks=checks,
+            metadata={
+                "size_bytes": len(code_bytes),
+                "sha256": hashlib.sha256(code_bytes).hexdigest(),
+                "elapsed_seconds": round(time.monotonic() - start, 3),
+            },
+        )
+        return report.to_dict()
+
+    checks.extend([
         _check_antivirus(code_bytes),
         _check_static(code_bytes),
         _check_llm(code_bytes),
-    ]
+    ])
 
     safe, confidence, summary = _aggregate(checks)
 
@@ -484,7 +513,6 @@ def analyze(code_bytes: bytes) -> dict:
     )
 
     return report.to_dict()
-
 
 # CLI mode ==================================================================
 
