@@ -3,3 +3,5 @@
 # Oblak MicroVMs resource files
 */resources/*
 !**/.gitkeep
+
+.env
