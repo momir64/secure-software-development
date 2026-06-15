@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 from contextlib import contextmanager
 import importlib.util
+import subprocess
 import traceback
 import socket
 import fcntl
@@ -9,7 +10,7 @@ import sys
 import io
 import os
 
-TCP_PORT = 8080
+VSOCK_PORT = 8080
 
 
 def _recv_exact(conn: socket.socket, n: int) -> bytes:
@@ -30,6 +31,10 @@ def _recv_msg(conn: socket.socket) -> dict:
 def _send_msg(conn: socket.socket, obj: dict) -> None:
     data = json.dumps(obj).encode()
     conn.sendall(len(data).to_bytes(4, "big") + data)
+
+
+def _run(*cmd: str) -> int:
+    return subprocess.run(list(cmd), capture_output=True, env={"PATH": "/usr/local/bin:/usr/bin:/bin:/sbin"}).returncode
 
 
 def _load_module(script: str):
@@ -62,6 +67,28 @@ def _capture_stderr():
         os.close(r)
 
 
+def _handle_setup(payload: dict) -> dict:
+    errors = []
+    env_dev = payload.get("env_dev", "")
+    if env_dev and _run("mount", "-t", "ext4", "-o", "ro", env_dev, "/env") != 0:
+        errors.append(f"failed to mount env {env_dev}")
+    elif env_dev:
+        sys.path.insert(0, "/env")
+    task_dev = payload.get("task_dev", "")
+    if task_dev and _run("mount", "-t", "ext4", "-o", "ro", task_dev, "/var/task") != 0:
+        errors.append(f"failed to mount task {task_dev}")
+    net = payload.get("network")
+    if net:
+        _run("ip", "addr", "flush", "dev", "eth0")
+        _run("ip", "route", "flush", "dev", "eth0")
+        _run("ip", "addr", "add", f"{net['guest_ip']}/{net['prefix']}", "dev", "eth0")
+        _run("ip", "link", "set", "eth0", "up")
+        _run("ip", "route", "add", "default", "via", net['gateway'])
+    if errors:
+        return {"status": "error", "errors": errors}
+    return {"status": "ok"}
+
+
 def _handle(payload: dict) -> dict:
     script = payload.get("script", "")
     input_str = payload.get("input", "")
@@ -84,17 +111,29 @@ def _handle(payload: dict) -> dict:
     return {"output": output, "stderr": stderr_buf.getvalue(), "exit_code": exit_code}
 
 
+def _setup_mounts() -> None:
+    if _run("mount", "-t", "tmpfs", "tmpfs", "/tmp") != 0:
+        print("Failed to mount tmpfs at /tmp", flush=True)
+        sys.exit(1)
+    _run("mount", "-t", "proc", "proc", "/proc")
+
+
 def main() -> None:
+    _setup_mounts()
     try:
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server = socket.socket(socket.AF_VSOCK, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind(("", TCP_PORT))
+        server.bind((socket.VMADDR_CID_ANY, VSOCK_PORT))
         server.listen(1)
         while True:
             conn, _ = server.accept()
             try:
                 while True:
-                    _send_msg(conn, _handle(_recv_msg(conn)))
+                    msg = _recv_msg(conn)
+                    if msg.get("type") == "setup":
+                        _send_msg(conn, _handle_setup(msg))
+                    else:
+                        _send_msg(conn, _handle(msg))
             except (ConnectionError, OSError):
                 pass
             finally:

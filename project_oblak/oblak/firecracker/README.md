@@ -160,15 +160,15 @@ jailer --version
 ```
 
 
-### Step 3: Set up guest kernel and base root filesystem
+### Step 3 & 4: Set up guest kernel and base root filesystem
 
 The guest kernel is a Linux kernel binary that Firecracker boots inside each MicroVM. The root filesystem is the base disk image MicroVMs start from and is prebuilt with Python. Instead of installing Lambda dependencies on each cold start, the orchestrator maintains a dedicated snapshot for each Lambda. On deployment, the orchestrator boots a MicroVM from the base image, installs its dependencies, and snapshots the VM state. Subsequent invocations restore that snapshot, bypassing the boot and install process.
 
 Snapshots are identified by a hash of the sorted contents of `requirements.txt`, so Lambdas sharing the same dependencies reuse the same snapshot regardless of declaration order. The script itself is not included in the snapshot and is injected into the running VM at invocation time.
 
-**Run these commands from the root of the Oblak directory.** 
+**IMPORTANT: Run these commands from the root of the Oblak directory.** 
 
-#### Kernel
+#### Step 3: Kernel
 
 Download the latest Firecracker CI kernel:
 ```bash
@@ -187,7 +187,7 @@ mkdir -p resources
 curl -fsSL -o resources/vmlinux "${S3_BASE}/${KERNEL_KEY}"
 ```
 
-#### Root filesystem image
+#### Step 4: Root filesystem image
 
 Docker is used to build the base filesystem image for the MicroVM. If `docker` is not available in WSL2, enable WSL integration in Docker Desktop under **Settings → Resources → WSL Integration**, enable **Ubuntu** distro and click **Apply**.
 
@@ -198,11 +198,14 @@ FROM alpine:3.19
 RUN apk add --no-cache python3 curl
 
 # Install uv instead of pip for faster Python dependency management
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh
 
-# Configure serial console for Firecracker
-RUN echo "ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100" >> /etc/inittab && \
-    echo "ttyS0" >> /etc/securetty
+# Runtime directory layout expected by the runner
+RUN mkdir -p /var/runtime /var/task
+
+# Bake in the trusted runner (read-only; user code cannot overwrite it)
+COPY runner.py /var/runtime/runner.py
+RUN chmod 544 /var/runtime/runner.py
 ```
 
 Build the base Docker image and convert it to an ext4 disk image that Firecracker mounts as the MicroVM's root drive. The `truncate` size should match `disk_size_mib` in `config/vm.toml`:
@@ -237,7 +240,7 @@ disk_size_mib = 512
 `vcpu_count` and `memory_mib` are passed directly to Firecracker's machine configuration API. `timeout_seconds` is enforced by the orchestrator to terminate VMs that exceed the execution time limit. `disk_size_mib` determines the size of the root filesystem image.
 
 
-### Step 4: Set up Jailer
+### Step 5: Set up Jailer
 
 Jailer wraps Firecracker in a chroot jail, drops privileges to a dedicated unprivileged user, and enforces cgroup resource limits. It is the secure way to run Firecracker in production.
 
@@ -262,7 +265,7 @@ ls -ld /srv/jailer
 You should see the `firecracker-jailer` user and group, and `/srv/jailer` owned by `firecracker-jailer`.
 
 
-### Step 5: Verify TAP networking support
+### Step 6: Verify TAP networking support
 
 A TAP device is a virtual network interface on the host that Firecracker connects the MicroVM to, giving it network access. Traffic is forwarded to the internet via NAT while iptables rules prevent MicroVMs from accessing the local network. The orchestrator manages TAP devices dynamically — this step only verifies that the necessary support is available.
 
@@ -287,9 +290,9 @@ An error here means NAT is not available in your setup.
 If either check fails, the orchestrator will not be able to provide MicroVMs with network access.
 
 
-### Step 6: Verify vsock support
+### Step 7: Verify vsock support
 
-Vsock (Virtual Socket) is a communication channel between the host and a MicroVM. The orchestrator uses it to inject Python scripts into the running VM, pass input, and receive output back.
+Vsock (Virtual Socket) is the communication channel between the orchestrator and a running MicroVM. All invocation payloads, results, and setup messages travel over vsock. TAP networking is separate and used only for user code internet access.
 
 **WSL2 only** — change `/etc/wsl.conf` to add `vhost_vsock` alongside the KVM boot command from Step 1 (use `kvm_amd` instead of `kvm_intel` on AMD CPUs):
 ```bash
@@ -318,7 +321,7 @@ ls -l /dev/vhost-vsock
 You should see `crw-rw----` with group `kvm`.
 
 
-### Step 7: Test boot a MicroVM (optional)
+### Step 8: Test boot a MicroVM (optional)
 
 This step boots a MicroVM through Jailer using the kernel and rootfs from Step 3 to verify the full stack works without using the orchestrator. On Linux you can also use `sudo bash firecracker/test.sh` to do this automatically.
 

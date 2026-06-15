@@ -1,8 +1,13 @@
 [vm]
 vcpu_count = 1
 memory_mib = 128
+max_ip_slots = 128
+env_size_mib = 256
+lambda_size_mib = 10
 idle_timeout_seconds = 300
 handler_timeout_seconds = 30
+cpu_period_us = 100000
+cpu_quota_us = 100000
 
 [rootfs]
 disk_size_mib = 512

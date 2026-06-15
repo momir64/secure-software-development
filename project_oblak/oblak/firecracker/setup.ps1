@@ -1,4 +1,4 @@
-# firecracker/setup.ps1
+﻿# firecracker/setup.ps1
 # Run from the oblak/ directory in an elevated PowerShell: .\firecracker\setup.ps1
 
 param([string]$OblakPath = "")
@@ -177,8 +177,8 @@ curl -fsSL -o resources/vmlinux "${S3_BASE}/${KERNEL_KEY}"
     Write-Ok "Kernel downloaded"
 }
 
-# ── Step 3: Root filesystem ───────────────────────────────────────────────────
-Write-Step "Step 3: Root filesystem"
+# ── Step 4: Root filesystem ───────────────────────────────────────────────────
+Write-Step "Step 4: Root filesystem"
 
 if (Test-Path "$OblakPath\resources\rootfs.ext4") {
     Write-Ok "Already present: resources/rootfs.ext4"
@@ -197,6 +197,7 @@ docker create --name oblak-base-tmp oblak-base
 mkdir -p /tmp/oblak-rootfs
 docker export oblak-base-tmp | tar -x -C /tmp/oblak-rootfs/
 docker rm oblak-base-tmp
+echo "nameserver 8.8.8.8" > /tmp/oblak-rootfs/etc/resolv.conf
 truncate -s ${DISK_SIZE}M resources/rootfs.ext4
 mkfs.ext4 -d /tmp/oblak-rootfs -F resources/rootfs.ext4
 rm -rf /tmp/oblak-rootfs
@@ -204,8 +205,8 @@ rm -rf /tmp/oblak-rootfs
     Write-Ok "Root filesystem created: resources/rootfs.ext4 (${diskSize}MiB)"
 }
 
-# ── Step 4: Jailer ────────────────────────────────────────────────────────────
-Write-Step "Step 4: Jailer"
+# ── Step 5: Jailer ────────────────────────────────────────────────────────────
+Write-Step "Step 5: Jailer"
 
 if (Test-Wsl "id firecracker-jailer 2>/dev/null") {
     Write-Ok "User firecracker-jailer already exists"
@@ -221,8 +222,8 @@ if (Test-Wsl "test -d /srv/jailer") {
     Write-Ok "Created /srv/jailer"
 }
 
-# ── Step 5: TAP networking ────────────────────────────────────────────────────
-Write-Step "Step 5: TAP networking"
+# ── Step 6: TAP networking ────────────────────────────────────────────────────
+Write-Step "Step 6: TAP networking"
 
 $null = wsl -u root bash -c "ip tuntap add dev tap-test mode tap 2>/dev/null && ip tuntap del dev tap-test mode tap 2>/dev/null" 2>&1
 if ($LASTEXITCODE -eq 0) {
