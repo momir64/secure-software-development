@@ -11,6 +11,7 @@ import time
 import uuid
 import os
 
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
 _BASE = Path(__file__).parent
@@ -20,6 +21,7 @@ _STUB = _RESOURCES / "stub.ext4"
 _SNAP_VMSTATE = _RESOURCES / "snapshot" / "vmstate"
 _SNAP_MEM = _RESOURCES / "snapshot" / "mem.snap"
 _LAMBDAS = _BASE / "lambdas"
+_ENVS = _BASE / "envs"
 _CHROOT_BASE = Path("/srv/jailer")
 
 
@@ -200,6 +202,8 @@ def _call(conn: socket.socket, msg: dict) -> dict:
 # ── Chroot ────────────────────────────────────────────────────────────────────
 
 def _link_or_copy(src: Path, dst: Path) -> None:
+    if not src.exists():
+        raise FileNotFoundError(f"source does not exist: {src}")
     try:
         os.link(src, dst)
     except OSError:
@@ -207,7 +211,7 @@ def _link_or_copy(src: Path, dst: Path) -> None:
     os.chmod(dst, 0o644)
 
 
-def _prepare_chroot(vm_id: str, lambda_id: str) -> Path:
+def _prepare_chroot(vm_id: str, lambda_id: str, env_hash: str | None) -> Path:
     chroot = _CHROOT_BASE / "firecracker" / vm_id / "root"
     res = chroot / "resources"
     res.mkdir(parents=True, exist_ok=True)
@@ -222,15 +226,22 @@ def _prepare_chroot(vm_id: str, lambda_id: str) -> Path:
     _link_or_copy(_SNAP_VMSTATE, res / "vmstate")
     _link_or_copy(_SNAP_MEM, res / "mem.snap")
 
+    if env_hash is not None:
+        shutil.copy2(_ENVS / f"env_{env_hash}.ext4", res / "env.ext4")
+        os.chmod(res / "env.ext4", 0o644)
+
     for d in (chroot, res, chroot / "run"):
         os.chown(d, _JAILER_UID, _JAILER_GID)
+
+    for f in res.iterdir():
+        os.chown(f, _JAILER_UID, _JAILER_GID)
 
     return chroot
 
 
 # ── VM lifecycle ──────────────────────────────────────────────────────────────
 
-def _cold_start(lambda_id: str) -> _VM:
+def _cold_start(lambda_id: str, env_hash: str | None) -> _VM:
     with _lock:
         if not _available_slots:
             raise RuntimeError("no available IP slots")
@@ -241,7 +252,7 @@ def _cold_start(lambda_id: str) -> _VM:
     ns_created = False
 
     try:
-        chroot = _prepare_chroot(vm_id, lambda_id)
+        chroot = _prepare_chroot(vm_id, lambda_id, env_hash)
         host_ip, guest_ip = _ns_up(slot)
         ns_created = True
         api_sock = str(chroot / "run" / "fc.sock")
@@ -279,16 +290,24 @@ def _cold_start(lambda_id: str) -> _VM:
         _fc(api_sock, "PATCH", "/drives/task", {
             "drive_id": "task", "path_on_host": "resources/lambda.ext4",
         })
+        if env_hash is not None:
+            _fc(api_sock, "PATCH", "/drives/env", {
+                "drive_id": "env", "path_on_host": "resources/env.ext4",
+            })
         _fc(api_sock, "PATCH", "/vm", {"state": "Resumed"})
 
         _wait_path(vsock_uds)
         conn = _vsock_connect(vsock_uds)
 
-        result = _call(conn, {
+        setup_msg = {
             "type": "setup",
             "task_dev": "/dev/vdc",
             "network": {"guest_ip": guest_ip, "prefix": 30, "gateway": host_ip},
-        })
+        }
+        if env_hash is not None:
+            setup_msg["env_dev"] = "/dev/vdb"
+
+        result = _call(conn, setup_msg)
         if result.get("status") != "ok":
             raise RuntimeError(f"runner setup failed: {result}")
 
@@ -334,16 +353,7 @@ def _reset_timer(lambda_id: str, vm: _VM) -> None:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def deploy(lambda_id: str, script_dir: str) -> None:
-    _LAMBDAS.mkdir(exist_ok=True)
-    out = str(_LAMBDAS / f"{lambda_id}.ext4")
-    subprocess.run(["truncate", "-s", f"{_LAMBDA_SIZE_MIB}M", out], check=True)
-    subprocess.run(["mkfs.ext4", "-q", "-d", script_dir, "-F", out], check=True)
-    os.chown(out, _JAILER_UID, _JAILER_GID)
-    os.chmod(out, 0o640)
-
-
-def invoke(lambda_id: str, script: str, input_str: str) -> dict:
+def invoke(lambda_id: str, script: str, input_str: str, env_hash: str | None = None) -> dict:
     with _lock:
         vm = _warm.get(lambda_id)
         if vm and vm.timer:
@@ -351,7 +361,7 @@ def invoke(lambda_id: str, script: str, input_str: str) -> dict:
             vm.timer = None
 
     if vm is None:
-        vm = _cold_start(lambda_id)
+        vm = _cold_start(lambda_id, env_hash)
         with _lock:
             _warm[lambda_id] = vm
 

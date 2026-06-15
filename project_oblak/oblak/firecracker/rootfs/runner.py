@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 from contextlib import contextmanager
 import importlib.util
+import subprocess
 import traceback
 import socket
 import fcntl
@@ -10,6 +11,7 @@ import io
 import os
 
 VSOCK_PORT = 8080
+
 
 def _recv_exact(conn: socket.socket, n: int) -> bytes:
     buf = bytearray()
@@ -29,6 +31,10 @@ def _recv_msg(conn: socket.socket) -> dict:
 def _send_msg(conn: socket.socket, obj: dict) -> None:
     data = json.dumps(obj).encode()
     conn.sendall(len(data).to_bytes(4, "big") + data)
+
+
+def _run(*cmd: str) -> int:
+    return subprocess.run(list(cmd), capture_output=True, env={"PATH": "/usr/local/bin:/usr/bin:/bin:/sbin"}).returncode
 
 
 def _load_module(script: str):
@@ -63,21 +69,21 @@ def _capture_stderr():
 
 def _handle_setup(payload: dict) -> dict:
     errors = []
-    env_dev = payload.get("env_dev")
-    if env_dev:
-        if os.system(f"mount -o ro {env_dev} /env") != 0:
-            errors.append(f"failed to mount env {env_dev}")
-    task_dev = payload.get("task_dev")
-    if task_dev:
-        if os.system(f"mount -o ro {task_dev} /var/task") != 0:
-            errors.append(f"failed to mount task {task_dev}")
+    env_dev = payload.get("env_dev", "")
+    if env_dev and _run("mount", "-t", "ext4", "-o", "ro", env_dev, "/env") != 0:
+        errors.append(f"failed to mount env {env_dev}")
+    elif env_dev:
+        sys.path.insert(0, "/env")
+    task_dev = payload.get("task_dev", "")
+    if task_dev and _run("mount", "-t", "ext4", "-o", "ro", task_dev, "/var/task") != 0:
+        errors.append(f"failed to mount task {task_dev}")
     net = payload.get("network")
     if net:
-        os.system("ip addr flush dev eth0")
-        os.system("ip route flush dev eth0")
-        os.system(f"ip addr add {net['guest_ip']}/{net['prefix']} dev eth0")
-        os.system("ip link set eth0 up")
-        os.system(f"ip route add default via {net['gateway']}")
+        _run("ip", "addr", "flush", "dev", "eth0")
+        _run("ip", "route", "flush", "dev", "eth0")
+        _run("ip", "addr", "add", f"{net['guest_ip']}/{net['prefix']}", "dev", "eth0")
+        _run("ip", "link", "set", "eth0", "up")
+        _run("ip", "route", "add", "default", "via", net['gateway'])
     if errors:
         return {"status": "error", "errors": errors}
     return {"status": "ok"}
@@ -106,10 +112,10 @@ def _handle(payload: dict) -> dict:
 
 
 def _setup_mounts() -> None:
-    if os.system("mount -t tmpfs tmpfs /tmp") != 0:
+    if _run("mount", "-t", "tmpfs", "tmpfs", "/tmp") != 0:
         print("Failed to mount tmpfs at /tmp", flush=True)
         sys.exit(1)
-    os.system("mount -t proc proc /proc")
+    _run("mount", "-t", "proc", "proc", "/proc")
 
 
 def main() -> None:

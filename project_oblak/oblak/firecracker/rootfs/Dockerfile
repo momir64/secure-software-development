@@ -11,3 +11,7 @@ RUN mkdir -p /var/runtime /var/task /env
 # Bake in the trusted runner (read-only; user code cannot overwrite it)
 COPY runner.py /var/runtime/runner.py
 RUN sed -i 's/\r$//' /var/runtime/runner.py && chmod 544 /var/runtime/runner.py
+
+# Bake in the env builder (runs as PID 1 in env-builder VMs)
+COPY env_builder.sh /var/runtime/env_builder.sh
+RUN sed -i 's/\r$//' /var/runtime/env_builder.sh && chmod 544 /var/runtime/env_builder.sh

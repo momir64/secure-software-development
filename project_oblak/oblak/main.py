@@ -1,16 +1,19 @@
 import orchestrator
+import deployer
 import os
 
 LAMBDA_ID = "test-lambda"
 SCRIPT_DIR = str(os.path.join(os.path.dirname(__file__), "test"))
+REQUIREMENTS = "requests\n"
 
 
 def test_deploy_invoke_destroy():
     orchestrator.startup()
     try:
-        orchestrator.deploy(LAMBDA_ID, SCRIPT_DIR)
+        env_hash = deployer.ensure_env(REQUIREMENTS)
+        deployer.deploy_lambda(LAMBDA_ID, SCRIPT_DIR)
 
-        result = orchestrator.invoke(LAMBDA_ID, "main.py", "hello")
+        result = orchestrator.invoke(LAMBDA_ID, "main.py", "hello", env_hash)
         print("invoke result:", result)
         assert result.get("exit_code") == 0, f"non-zero exit: {result}"
         assert "hello" in result.get("output", ""), f"unexpected output: {result}"
