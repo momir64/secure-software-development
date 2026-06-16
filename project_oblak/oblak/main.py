@@ -140,8 +140,8 @@ async def deploy_lambda(request: Request):
     await send({"status": "starting code analysis"})
 
     analysis_reports = []
-    for uploaded in files:
-        report = analyze(uploaded.body)
+    for i, uploaded in enumerate(files):
+        report = analyze(uploaded.body, is_handler_file=(i == 0))
         analysis_reports.append({"file": uploaded.name, "report": report})
         if not report["safe"]:
             await _audit(request.app.ctx.db, user_id, None, "deploy_rejected", ip, {"analysis": analysis_reports})

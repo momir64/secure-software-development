@@ -84,7 +84,7 @@ class AnalysisReport:
 
 
 # File validation ==============================================
-def _check_file_type(code_bytes: bytes) -> CheckResult:
+def _check_file_type(code_bytes: bytes, is_handler_file: bool = False) -> CheckResult:
     # Empty file is not valid Python
     if not code_bytes or len(code_bytes.strip()) == 0:
         return CheckResult(
@@ -112,13 +112,44 @@ def _check_file_type(code_bytes: bytes) -> CheckResult:
 
     # Must parse as Python
     try:
-        ast.parse(source)
+        tree = ast.parse(source)
     except SyntaxError as e:
         return CheckResult(
             name="File validation",
             status="fail",
             description=f"Python syntax error: {e}",
             details=[str(e)],
+        )
+    
+    if not is_handler_file:
+        lines = source.splitlines()
+        return CheckResult(
+            name="File validation",
+            status="pass",
+            description=f"Valid Python source file ({len(lines)} lines).",
+            raw={"lines": len(lines), "size_bytes": len(code_bytes)},
+        )
+
+    # Must meet contract    
+    main_func = None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == "main":
+            main_func = node
+            break
+
+    if not main_func:
+        return CheckResult(
+            name="File validation",
+            status="fail",
+            description="Contract violation: Global 'main' function is missing.",
+        )
+
+    total_args = len(main_func.args.args) + len(main_func.args.posonlyargs)
+    if total_args != 1 or main_func.args.vararg or main_func.args.kwarg:
+        return CheckResult(
+            name="File validation",
+            status="fail",
+            description=f"Contract violation: 'main' must accept exactly 1 argument (found {total_args}).",
         )
 
     lines = source.splitlines()
@@ -469,11 +500,11 @@ def _aggregate(checks: list[CheckResult]) -> tuple[bool, str, str]:
 
 # Public API ================================================================
 
-def analyze(code_bytes: bytes) -> dict:
+def analyze(code_bytes: bytes, is_handler_file: bool = False) -> dict:
     start = time.monotonic()
     checks = []
 
-    file_check = _check_file_type(code_bytes)
+    file_check = _check_file_type(code_bytes, is_handler_file)
     checks.append(file_check)
 
     if file_check.status == "fail":
