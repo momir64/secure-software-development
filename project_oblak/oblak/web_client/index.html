@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="darkreader-lock">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oblak</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div class="card">
+
+    <div class="field">
+        <label for="lambda-id">Lambda ID</label>
+        <input id="lambda-id" type="text" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false">
+    </div>
+
+    <div class="field">
+        <label for="input">Input</label>
+        <textarea id="input" rows="6" placeholder="Input string passed to main()…"></textarea>
+    </div>
+
+    <div class="field">
+        <label for="output">Output</label>
+        <textarea id="output" rows="6" readonly placeholder="Output will appear here…"></textarea>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <button id="invoke-btn" onclick="invoke()">Invoke</button>
+</div>
+
+<script src="/script.js"></script>
+</body>
+</html>

@@ -20,13 +20,15 @@ _LAMBDAS = _BASE / "lambdas"
 with open(_BASE / "config" / "vm.toml", "rb") as _f:
     _cfg = tomllib.load(_f)
 
-_MEM = _cfg["vm"]["memory_mib"]
-_VCPU = _cfg["vm"]["vcpu_count"]
+_MEM = _cfg["vm"]["env_memory_mib"]
+_VCPU = _cfg["vm"]["env_vcpu_count"]
 _LAMBDA_SIZE_MIB = _cfg["vm"]["lambda_size_mib"]
 _ENV_SIZE_MIB = _cfg["vm"].get("env_size_mib", 256)
+_ENV_BUILD_TIMEOUT = _cfg["vm"].get("env_build_timeout_seconds", 600)
 
 _JAILER_UID = int(subprocess.check_output(["id", "-u", "firecracker-jailer"]).strip())
 _JAILER_GID = int(subprocess.check_output(["id", "-g", "firecracker-jailer"]).strip())
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,7 +37,7 @@ def _env_hash(requirements: str) -> str:
     return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
 
-def _wait_exit(pid: int, timeout: float = 120.0) -> None:
+def _wait_exit(pid: int, timeout: float = _ENV_BUILD_TIMEOUT) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -117,6 +119,7 @@ def _configure_fc_vm(fc_sock: str, req_image: Path, out_image: Path, tap: str) -
     })
     _fc(fc_sock, "PUT", "/actions", {"action_type": "InstanceStart"})
 
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def deploy_lambda(lambda_id: str, script_dir: str) -> None:
@@ -125,6 +128,12 @@ def deploy_lambda(lambda_id: str, script_dir: str) -> None:
     _make_ext4(out, _LAMBDA_SIZE_MIB, src_dir=Path(script_dir), capture_output=True)
     os.chown(out, _JAILER_UID, _JAILER_GID)
     os.chmod(out, 0o640)
+
+
+def env_needs_build(requirements: str) -> bool:
+    if not requirements.strip():
+        return False
+    return not (_ENVS / f"env_{_env_hash(requirements)}.ext4").exists()
 
 
 def ensure_env(requirements: str) -> str | None:
@@ -176,6 +185,11 @@ def ensure_env(requirements: str) -> str | None:
         _configure_fc_vm(str(fc_sock), req_image, out_image, tap)
         _wait_exit(process.pid)
         process = None
+
+        result = subprocess.run(["debugfs", "-R", "ls /", str(out_image)], capture_output=True, text=True)
+        if ".__build_ok__" not in result.stdout:
+            log_contents = (work_dir / "fc.log").read_text() if (work_dir / "fc.log").exists() else "no log"
+            raise RuntimeError(f"env build failed: pip install failed\n{log_contents}")
 
         out_image.rename(env_image)
         return hash_
