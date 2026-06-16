@@ -2,7 +2,10 @@
 vcpu_count = 1
 memory_mib = 128
 max_ip_slots = 128
-env_size_mib = 256
+env_vcpu_count = 4
+env_size_mib = 1024
+env_memory_mib = 512
+env_build_timeout_seconds = 600
 lambda_size_mib = 10
 idle_timeout_seconds = 300
 handler_timeout_seconds = 30
