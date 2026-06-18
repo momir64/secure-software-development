@@ -119,3 +119,15 @@ rule OblakRuntimeInstall {
     condition:
         ($pip1 or $pip2 or $uv) and ($subp or $os_s)
 }
+
+rule EICARTest {
+    meta:
+        description = "EICAR antivirus test string"
+        severity = "critical"
+
+    strings:
+        $eicar = "EICAR-STANDARD-ANTIVIRUS-TEST-FILE"
+
+    condition:
+        $eicar
+}
