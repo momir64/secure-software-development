@@ -25,6 +25,7 @@ A central architectural decision is that **every function runs inside its own is
 15. [Database Schema](#15-database-schema)
 16. [VM Configuration Reference](#16-vm-configuration-reference)
 17. [Security Architecture Summary](#17-security-architecture-summary)
+18. [Security Assessment Report](#18-security-assessment-report)
 
 ---
 
@@ -980,3 +981,247 @@ The following table summarizes every implemented security mechanism, what threat
 - **LLM analysis is probabilistic.** Claude Haiku may produce false negatives (missing genuinely malicious code) or false positives (blocking legitimate code). It is one layer in a defense-in-depth stack, not a definitive verdict.
 - **LLM analysis silently skips.** If the Anthropic API key is absent or the API is unreachable, this layer produces a `skip` result, not a failure. Operators should monitor for elevated skip rates.
 - **Invocation is unauthenticated by UUID.** Lambda IDs are UUIDs (122 bits of entropy), which makes guessing impractical but not impossible. There is no per-invocation authentication, rate limiting, or IP allowlisting at the platform level.
+
+## 18. Security Assessment Report
+
+### 18.1. Executive Summary
+
+The assessment identified a limited set of realistic security issues that primarily affect deployment isolation, static-analysis robustness, rate limiting, information disclosure through error handling, upload validation, and analyzer decision logic.
+
+| Severity | Count |
+|----------|-------|
+| Critical | 0 |
+| High | 5 |
+| Medium | 4 |
+| Low | 2 |
+| Informational | 2 |
+
+---
+
+### 18.2. STRIDE Threat Modeling
+
+#### 18.2.1 Spoofing
+
+| ID | Component | Threat |
+|----|-----------|--------|
+| S-1 | CDK CLI | Credential file replay through theft of locally stored credentials |
+| S-2 | Vsock | Potential vsock impersonation if an attacker gains access to the internal communication channel |
+
+#### 18.2.2 Tampering
+
+| ID | Component | Threat |
+|----|-----------|--------|
+| T-1 | Deployer | Malicious `requirements.txt` execution during environment building |
+| T-2 | Analyzer | Static-analysis bypass through aliased imports |
+| T-3 | Runner | Module re-import path traversal (theoretical) |
+
+#### 18.2.3 Repudiation
+
+| ID | Component | Threat |
+|----|-----------|--------|
+| R-1 | Audit Logging | Anonymous invocations are not attributed to a specific actor |
+| R-2 | Audit Logging | Audit logs lack tamper-evident protections |
+| R-3 | CDK CLI | Password exposure through command-line arguments |
+
+#### 18.2.4 Information Disclosure
+
+| ID | Component | Threat |
+|----|-----------|--------|
+| I-1 | Deployer | Internal Firecracker logs returned to clients |
+| I-2 | HTTP Layer | Missing security headers and Content Security Policy |
+
+#### 18.2.5 Denial of Service
+
+| ID | Component | Threat |
+|----|-----------|--------|
+| D-1 | HTTP Server | Missing rate limiting on authentication and invocation endpoints |
+| D-2 | HTTP Server | Unbounded upload sizes |
+| D-3 | Storage | Long-term accumulation of soft-deleted disk images |
+
+#### 18.2.6 Elevation of Privilege
+
+| ID | Component | Threat |
+|----|-----------|--------|
+| E-1 | Deployer | Environment-builder VM not protected by the same isolation controls as runtime VMs |
+| E-2 | Analyzer | Warning aggregation logic permits suspicious code to be treated as deployable |
+
+---
+
+### 18.3. Identified Threats and Mitigations
+
+#### THREAT-01 — Unjailed Environment Builder VM
+
+**Severity:** High  
+**STRIDE:** E-1
+
+The environment-building Firecracker instance is launched with weaker isolation guarantees than production runtime VMs. Package installation may execute arbitrary package hooks during dependency installation.
+
+**Observed Implementation:** The deployment workflow starts a dedicated environment-building VM without the full Jailer-based isolation stack used for runtime workloads.
+
+**Mitigation:** Apply the same isolation model used by runtime VMs, including Jailer, namespace isolation, and resource controls.
+
+---
+
+#### THREAT-02 — Static Analysis Bypass via Aliased Imports
+
+**Severity:** High  
+**STRIDE:** T-2
+
+The static-analysis pipeline can be bypassed using alternative import patterns and indirect function resolution techniques.
+
+**Observed Implementation:** Dangerous API detection primarily focuses on direct references and may not fully resolve aliases or dynamic import chains.
+
+**Mitigation:** Expand AST analysis to track aliases, indirect imports, and dynamic module resolution paths.
+
+---
+
+#### THREAT-03 — Missing Rate Limiting
+
+**Severity:** High  
+**STRIDE:** D-1
+
+Authentication and invocation endpoints do not enforce request throttling, increasing exposure to brute-force and resource-consumption attacks.
+
+**Observed Implementation:** No centralized rate-limiting mechanism is applied to sensitive endpoints.
+
+**Mitigation:** Introduce per-user and per-IP rate limiting with configurable thresholds and monitoring.
+
+---
+
+#### THREAT-04 — Firecracker Log Disclosure
+
+**Severity:** High  
+**STRIDE:** I-1
+
+Internal Firecracker diagnostic information may be exposed to users when environment creation fails.
+
+**Observed Implementation:** Detailed build failures can propagate infrastructure-level diagnostic information to clients.
+
+**Mitigation:** Retain detailed logs server-side and return sanitized error messages to users.
+
+---
+
+#### THREAT-05 — Unbounded Upload Sizes
+
+**Severity:** High  
+**STRIDE:** D-2
+
+Large uploads can consume memory, storage, or request-processing capacity.
+
+**Observed Implementation:** No explicit upload size restrictions are enforced for deployment artifacts.
+
+**Mitigation:** Apply request and file-size limits at both application and reverse-proxy layers.
+
+---
+
+#### THREAT-06 — Missing Invocation Attribution
+
+**Severity:** Medium  
+**STRIDE:** R-1
+
+Invocation audit records do not always contain a user identity, reducing forensic traceability.
+
+**Mitigation:** Associate invocation records with an owner or authenticated actor whenever possible.
+
+---
+
+#### THREAT-07 — Analyzer Warning Aggregation Logic
+
+**Severity:** Medium  
+**STRIDE:** E-2
+
+Suspicious findings can still result in deployable code if no rule reaches a failure state.
+
+**Mitigation:** Revisit aggregation logic and define escalation thresholds for warning-heavy results.
+
+---
+
+#### THREAT-08 — Missing Security Headers
+
+**Severity:** Medium  
+**STRIDE:** I-2
+
+The web interface does not currently enforce common browser-side security protections.
+
+**Mitigation:** Add a Content Security Policy, HSTS, and related security headers.
+
+---
+
+#### THREAT-09 — Soft-Delete Disk Accumulation
+
+**Severity:** Medium  
+**STRIDE:** D-3
+
+Disk images associated with deleted functions are intentionally retained. Over time this may increase storage consumption.
+
+**Mitigation:** Introduce an archival lifecycle policy where inactive images are retained temporarily and removed after a defined retention period.
+
+---
+
+#### THREAT-10 — Password Exposure Through CLI Arguments
+
+**Severity:** Low  
+**STRIDE:** R-3
+
+Passwords supplied through command-line arguments may be visible in shell history or process listings.
+
+**Observed Implementation:** This behavior exists as a convenience feature.
+
+**Mitigation:** Prefer interactive password entry and clearly document the associated trade-off.
+
+---
+
+#### THREAT-11 — Module Re-Import Path Traversal
+
+**Severity:** Low  
+**STRIDE:** T-3
+
+A theoretical path traversal scenario could exist if trusted deployment metadata becomes compromised.
+
+**Mitigation:** Validate filenames during deployment and prior to module loading.
+
+---
+
+### 18.4. Static Analysis Review
+
+Code was review using out own [analyser.py](oblak/analyzer.py) tool, which implements a four-layer analysis pipeline:
+
+1. **File Validation** — Ensures the uploaded file is a valid Python source file and adheres to the expected function contract.
+
+2. **YARA Antivirus** — Scans the source against a curated set of YARA rules for known malware patterns.
+
+3. **AST + Bandit Static Analysis** — Performs a static
+
+4. **LLM (Claude) Semantic Review** — Optionally sends the source to an LLM for semantic analysis and threat detection.
+
+> Note: The LLM layer is not included in this report because of the costs
+
+Results can be found in [doc/analyzer_report.txt](doc/analyzer_report.txt).
+
+---
+
+### 18.5. Threat Dragon Diagram Representation
+
+<img src="doc/threatmodel.png" alt="Threat Model"/>
+
+[json](doc/threatmodel.json)
+
+---
+
+## Remediation Priority Matrix
+
+| Priority | ID | Action |
+|----------|----|--------|
+| P1 | THREAT-01 | Apply runtime-equivalent isolation to environment builder |
+| P1 | THREAT-02 | Strengthen alias and dynamic-import detection |
+| P1 | THREAT-03 | Introduce endpoint rate limiting |
+| P1 | THREAT-04 | Sanitize client-facing error responses |
+| P1 | THREAT-05 | Enforce upload limits |
+| P2 | THREAT-06 | Improve invocation attribution |
+| P2 | THREAT-07 | Revise analyzer aggregation logic |
+| P2 | THREAT-08 | Add security headers |
+| P2 | THREAT-09 | Introduce archival lifecycle management |
+| P3 | THREAT-10 | Encourage secure CLI credential handling |
+| P3 | THREAT-11 | Add filename validation safeguards |
+
+---
