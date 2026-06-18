@@ -991,7 +991,7 @@ The assessment identified a limited set of realistic security issues that primar
 | Severity | Count |
 |----------|-------|
 | Critical | 0 |
-| High | 7 |
+| High | 5 |
 | Medium | 4 |
 | Low | 2 |
 | Informational | 2 |
@@ -1035,47 +1035,32 @@ The assessment identified a limited set of realistic security issues that primar
 | ID | Component | Threat |
 |----|-----------|--------|
 | D-1 | HTTP Server | Missing rate limiting on authentication and invocation endpoints |
-| D-2 | HTTP Server | Unbounded upload sizes |
-| D-3 | Storage | Long-term accumulation of soft-deleted disk images |
+| D-2 | Storage | Long-term accumulation of soft-deleted disk images |
 
 #### 18.2.6 Elevation of Privilege
 
 | ID | Component | Threat |
 |----|-----------|--------|
-| E-1 | Deployer | Environment-builder VM not protected by the same isolation controls as runtime VMs |
-| E-2 | Analyzer | Warning aggregation logic permits suspicious code to be treated as deployable |
+| E-1 | Analyzer | Warning aggregation logic permits suspicious code to be treated as deployable |
 
 ---
 
 ### 18.3. Identified Threats and Mitigations
 
-#### THREAT-01 — Unjailed Environment Builder VM
-
-**Severity:** High  
-**STRIDE:** E-1
-
-The environment-building Firecracker instance is launched with weaker isolation guarantees than production runtime VMs. Package installation may execute arbitrary package hooks during dependency installation.
-
-**Observed Implementation:** The deployment workflow starts a dedicated environment-building VM without the full Jailer-based isolation stack used for runtime workloads.
-
-**Mitigation:** Apply the same isolation model used by runtime VMs, including Jailer, namespace isolation, and resource controls.
-
----
-
-#### THREAT-02 — Static Analysis Bypass via Aliased Imports
+#### THREAT-01 — Static Analysis Bypass via Aliased Imports
 
 **Severity:** High  
 **STRIDE:** T-2
 
 The static-analysis pipeline can be bypassed using alternative import patterns and indirect function resolution techniques.
 
-**Observed Implementation:** Dangerous API detection primarily focuses on direct references and may not fully resolve aliases or dynamic import chains.
+**Observed Implementation:** The static-analysis pipeline primarily focuses on direct references and may not fully resolve aliases or dynamic import chains.
 
 **Mitigation:** Expand AST analysis to track aliases, indirect imports, and dynamic module resolution paths.
 
 ---
 
-#### THREAT-03 — Missing Rate Limiting
+#### THREAT-02 — Missing Rate Limiting
 
 **Severity:** High  
 **STRIDE:** D-1
@@ -1088,33 +1073,20 @@ Authentication and invocation endpoints do not enforce request throttling, incre
 
 ---
 
-#### THREAT-04 — Firecracker Log Disclosure
+#### THREAT-03 — Internal Error Information Disclosure
 
 **Severity:** High  
 **STRIDE:** I-1
 
-Internal Firecracker diagnostic information may be exposed to users when environment creation fails.
+Internal deployment and environment-building diagnostic information could expose infrastructure details if returned directly to users.
 
-**Observed Implementation:** Detailed build failures can propagate infrastructure-level diagnostic information to clients.
+**Observed Implementation:** Environment build errors are no longer returned to clients. Detailed build information is stored internally through audit logging.
 
-**Mitigation:** Retain detailed logs server-side and return sanitized error messages to users.
-
----
-
-#### THREAT-05 — Unbounded Upload Sizes
-
-**Severity:** High  
-**STRIDE:** D-2
-
-Large uploads can consume memory, storage, or request-processing capacity.
-
-**Observed Implementation:** No explicit upload size restrictions are enforced for deployment artifacts.
-
-**Mitigation:** Apply request and file-size limits at both application and reverse-proxy layers.
+**Mitigation:** Continue sanitizing client-facing responses and keep detailed diagnostic information restricted to server-side audit records.
 
 ---
 
-#### THREAT-06 — Missing Invocation Attribution
+#### THREAT-04 — Missing Invocation Attribution
 
 **Severity:** Medium  
 **STRIDE:** R-1
@@ -1125,10 +1097,10 @@ Invocation audit records do not always contain a user identity, reducing forensi
 
 ---
 
-#### THREAT-07 — Analyzer Warning Aggregation Logic
+#### THREAT-05 — Analyzer Warning Aggregation Logic
 
 **Severity:** Medium  
-**STRIDE:** E-2
+**STRIDE:** E-1
 
 Suspicious findings can still result in deployable code if no rule reaches a failure state.
 
@@ -1136,7 +1108,7 @@ Suspicious findings can still result in deployable code if no rule reaches a fai
 
 ---
 
-#### THREAT-08 — Missing Security Headers
+#### THREAT-06 — Missing Security Headers
 
 **Severity:** Medium  
 **STRIDE:** I-2
@@ -1147,10 +1119,10 @@ The web interface does not currently enforce common browser-side security protec
 
 ---
 
-#### THREAT-09 — Soft-Delete Disk Accumulation
+#### THREAT-07 — Soft-Delete Disk Accumulation
 
 **Severity:** Medium  
-**STRIDE:** D-3
+**STRIDE:** D-2
 
 Disk images associated with deleted functions are intentionally retained. Over time this may increase storage consumption.
 
@@ -1158,7 +1130,7 @@ Disk images associated with deleted functions are intentionally retained. Over t
 
 ---
 
-#### THREAT-10 — Password Exposure Through CLI Arguments
+#### THREAT-08 — Password Exposure Through CLI Arguments
 
 **Severity:** Low  
 **STRIDE:** R-3
@@ -1171,7 +1143,7 @@ Passwords supplied through command-line arguments may be visible in shell histor
 
 ---
 
-#### THREAT-11 — Module Re-Import Path Traversal
+#### THREAT-09 — Module Re-Import Path Traversal
 
 **Severity:** Low  
 **STRIDE:** T-3
@@ -1182,7 +1154,7 @@ A theoretical path traversal scenario could exist if trusted deployment metadata
 
 ---
 
-#### THREAT-12 — Credential File Replay
+#### THREAT-10 — Credential File Replay
 
 **Severity:** High  
 **STRIDE:** S-1
@@ -1193,7 +1165,7 @@ A stolen local credential file can allow an attacker to impersonate a valid user
 
 **Mitigation:** Protect the credential file with restrictive filesystem permissions, reduce token lifetime, and consider encrypted credential storage or refresh-token based authentication.
 
-#### THREAT-13 — Vsock Impersonation
+#### THREAT-11 — Vsock Impersonation
 
 **Severity:** Medium  
 **STRIDE:** S-2
@@ -1204,7 +1176,7 @@ The vsock communication channel does not provide built-in authentication, allowi
 
 **Mitigation:** Network namespace isolation and restrictive chroot filesystem permissions limit access to the vsock endpoint.
 
-#### THREAT-14 — Malicious requirements.txt Execution
+#### THREAT-12 — Malicious requirements.txt Execution
 
 **Severity:** High  
 **STRIDE:** T-1
@@ -1215,7 +1187,7 @@ User-controlled dependency installation may execute arbitrary package installati
 
 **Mitigation:** Run environment builders inside isolated Jailer-protected Firecracker VMs and consider dependency allowlisting or package verification.
 
-#### THREAT-15 — Audit Log Integrity
+#### THREAT-13 — Audit Log Integrity
 
 **Severity:** Medium  
 **STRIDE:** R-2
@@ -1234,7 +1206,7 @@ Code was review using out own [analyser.py](oblak/analyzer.py) tool, which imple
 
 2. **YARA Antivirus** — Scans the source against a curated set of YARA rules for known malware patterns.
 
-3. **AST + Bandit Static Analysis** — Performs a static
+3. **AST + Bandit Static Analysis** — Performs static analysis.
 
 4. **LLM (Claude) Semantic Review** — Optionally sends the source to an LLM for semantic analysis and threat detection.
 
@@ -1259,14 +1231,14 @@ Results can be found in [doc/analyzer_report.txt](doc/analyzer_report.txt).
 | P1 | T-2 | Strengthen alias and dynamic-import detection |
 | P1 | D-1 | Introduce endpoint rate limiting |
 | P1 | T-1 | Restrict dependency installation and strengthen environment build validation |
-| P2 | I-1 | Maintain sanitized client-facing error responses and server-side audit logging |
-| P2 | E-2 | Revise analyzer aggregation logic |
 | P2 | R-1 | Improve invocation attribution |
-| P2 | R-2 | Introduce append-only audit logging and integrity protection |
-| P2 | I-2 | Add security headers |
-| P2 | D-3 | Introduce archival lifecycle management |
+| P2 | E-2 | Revise analyzer aggregation logic |
+| P2 | I-2 | Add Content Security Policy, HSTS, and related security headers |
+| P2 | D-3 | Introduce archival lifecycle management for retained disk images |
 | P2 | S-1 | Improve credential storage and token lifecycle management |
+| P2 | R-2 | Introduce append-only audit logging and integrity protection |
+| P3 | R-3 | Encourage secure CLI credential handling practices |
+| P3 | T-3 | Add filename validation safeguards before module loading |
 | P3 | S-2 | Further harden vsock endpoint access controls |
-| P3 | T-3 | Add filename validation safeguards |
 
 ---

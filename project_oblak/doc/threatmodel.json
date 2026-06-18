@@ -20,6 +20,48 @@
           {
             "shape": "trust-boundary-curve",
             "width": 200,
+            "height": 400,
+            "zIndex": 18,
+            "connector": "smooth",
+            "data": {
+              "type": "tm.Boundary",
+              "name": "Internet / Cloudflare Tunnel Boundary",
+              "description": "",
+              "isTrustBoundary": true,
+              "hasOpenThreats": false,
+              "crossingFlows": [],
+              "containedElements": []
+            },
+            "labels": [
+              "Internet / Cloudflare"
+            ],
+            "id": "202facdf-7b14-45b6-92d6-0b209793ab28",
+            "source": {
+              "x": 140,
+              "y": 10
+            },
+            "target": {
+              "x": 70,
+              "y": 520
+            },
+            "vertices": [
+              {
+                "x": 210,
+                "y": 100
+              },
+              {
+                "x": 240,
+                "y": 270
+              },
+              {
+                "x": 190,
+                "y": 430
+              }
+            ]
+          },
+          {
+            "shape": "trust-boundary-curve",
+            "width": 200,
             "height": 300,
             "zIndex": 0,
             "connector": "smooth",
@@ -316,10 +358,10 @@
                   "number": 2,
                   "title": "Unbounded File Upload",
                   "type": "Denial of service",
-                  "status": "Open",
+                  "status": "Mitigated",
                   "severity": "High",
-                  "description": "No REQUEST_MAX_SIZE; large multipart uploads can exhaust RAM/disk.",
-                  "mitigation": "Set app.config.REQUEST_MAX_SIZE and per-file byte limits.",
+                  "description": "Large uploads could previously exhaust memory or storage resources.",
+                  "mitigation": "Application-level upload size limits are enforced for deployment artifacts.",
                   "modelType": "STRIDE"
                 }
               ]
@@ -600,23 +642,23 @@
                 {
                   "threatId": "thr-e1",
                   "number": 6,
-                  "title": "Unjailed Env-Builder VM",
+                  "title": "Environment Builder Isolation",
                   "type": "Elevation of privilege",
-                  "status": "Open",
+                  "status": "Mitigated",
                   "severity": "High",
-                  "description": "Env-builder Firecracker runs without Jailer; pip install hooks execute as server user.",
-                  "mitigation": "Wrap env-builder in Jailer with dedicated netns and cgroup limits.",
+                  "description": "Environment building previously used weaker isolation controls than runtime VMs.",
+                  "mitigation": "Environment builders now run with Jailer isolation, dedicated namespaces, and resource controls equivalent to runtime VMs.",
                   "modelType": "STRIDE"
                 },
                 {
                   "threatId": "thr-i2",
                   "number": 7,
-                  "title": "Firecracker Log in Error Response",
+                  "title": "Firecracker Log Disclosure",
                   "type": "Information disclosure",
-                  "status": "Open",
+                  "status": "Mitigated",
                   "severity": "High",
-                  "description": "fc.log contents returned verbatim to user on build failure.",
-                  "mitigation": "Log server-side; return generic error message to client.",
+                  "description": "Internal Firecracker build diagnostics are no longer returned directly to clients.",
+                  "mitigation": "Detailed deployment errors are stored in audit logs while clients receive sanitized responses.",
                   "modelType": "STRIDE"
                 },
                 {
@@ -778,8 +820,8 @@
                 "text": "Jailer + Firecracker\nMicroVM"
               },
               "body": {
-                "stroke": "#333333",
-                "strokeWidth": 1.5,
+                "stroke": "red",
+                "strokeWidth": 2.5,
                 "strokeDasharray": null
               }
             },
@@ -876,7 +918,7 @@
               "outOfScope": false,
               "isTrustBoundary": false,
               "reasonOutOfScope": "",
-              "hasOpenThreats": false,
+              "hasOpenThreats": true,
               "handlesCardPayment": false,
               "handlesGoodsOrServices": false,
               "isWebApplication": false,
@@ -1191,11 +1233,13 @@
                 "text": "Host Filesystem\n(lambdas/, envs/)"
               },
               "topLine": {
-                "strokeWidth": 1.5,
+                "stroke": "red",
+                "strokeWidth": 2.5,
                 "strokeDasharray": null
               },
               "bottomLine": {
-                "strokeWidth": 1.5,
+                "stroke": "red",
+                "strokeWidth": 2.5,
                 "strokeDasharray": null
               }
             },
@@ -1292,7 +1336,7 @@
               "outOfScope": false,
               "isTrustBoundary": false,
               "reasonOutOfScope": "",
-              "hasOpenThreats": false,
+              "hasOpenThreats": true,
               "isALog": false,
               "isEncrypted": false,
               "isSigned": false,
@@ -1689,48 +1733,6 @@
               {
                 "x": 680,
                 "y": 620
-              }
-            ]
-          },
-          {
-            "shape": "trust-boundary-curve",
-            "width": 200,
-            "height": 400,
-            "zIndex": 18,
-            "connector": "smooth",
-            "data": {
-              "type": "tm.Boundary",
-              "name": "Internet / Cloudflare Tunnel Boundary",
-              "description": "",
-              "isTrustBoundary": true,
-              "hasOpenThreats": false,
-              "crossingFlows": [],
-              "containedElements": []
-            },
-            "labels": [
-              "Internet / Cloudflare"
-            ],
-            "id": "202facdf-7b14-45b6-92d6-0b209793ab28",
-            "source": {
-              "x": 140,
-              "y": 10
-            },
-            "target": {
-              "x": 70,
-              "y": 520
-            },
-            "vertices": [
-              {
-                "x": 210,
-                "y": 100
-              },
-              {
-                "x": 240,
-                "y": 270
-              },
-              {
-                "x": 190,
-                "y": 430
               }
             ]
           }
