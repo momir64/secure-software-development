@@ -27,11 +27,15 @@ _PORT = int(os.environ.get("PORT", "8000"))
 _JWT_EXPIRES_HOURS = int(os.environ.get("JWT_EXPIRES_HOURS", "24"))
 _JWT_SECRET = os.environ["JWT_SECRET"]
 _DB_DSN = os.environ["DATABASE_URL"]
+_MAX_UPLOAD_FILES = int(os.environ.get("MAX_UPLOAD_FILES", "20"))
+_MAX_FILE_SIZE_MIB = int(os.environ.get("MAX_FILE_SIZE_MIB", "10"))
 
 app = Sanic("oblak")
 app.static("/", _BASE / "web_client", index="index.html")
 app.config.RESPONSE_TIMEOUT = 600
 app.config.REQUEST_TIMEOUT = 600
+app.config.REQUEST_MAX_SIZE = _MAX_UPLOAD_FILES * _MAX_FILE_SIZE_MIB * 1024 * 1024
+
 
 # ── DB / lifecycle ────────────────────────────────────────────────────────────
 
@@ -127,15 +131,27 @@ async def deploy_lambda(request: Request):
     ip = _client_ip(request)
     user_id = request.ctx.user_id
     files = request.files.getlist("files") if request.files else []
+    req_file = request.files.get("requirements")
     loop = asyncio.get_event_loop()
     response = await request.respond(content_type="application/x-ndjson")
-
-    if not files:
-        return json_resp({"error": "at least one file is required"}, status=400)
 
     async def send(obj: dict) -> None:
         await response.send(json.dumps(obj) + "\n")
         await asyncio.sleep(0)
+
+    if not files:
+        await send({"status": "error", "message": "at least one file is required"})
+        await response.eof()
+        return
+    if len(files) > _MAX_UPLOAD_FILES:
+        await send({"status": "error", "message": f"at most {_MAX_UPLOAD_FILES} files allowed"})
+        await response.eof()
+        return
+    for uploaded in (files + [req_file] if req_file else files):
+        if len(uploaded.body) > _MAX_FILE_SIZE_MIB * 1024 * 1024:
+            await send({"status": "error", "message": f"{uploaded.name} exceeds the {_MAX_FILE_SIZE_MIB} MiB file size limit"})
+            await response.eof()
+            return
 
     await send({"status": "starting code analysis"})
 
@@ -150,7 +166,6 @@ async def deploy_lambda(request: Request):
             return
 
     name = request.form.get("name") or f"lambda-{uuid.uuid4().hex[:8]}"
-    req_file = request.files.get("requirements")
     lambda_id = str(uuid.uuid4())
 
     try:
@@ -169,7 +184,8 @@ async def deploy_lambda(request: Request):
         if requirements.strip():
             await send({"status": "environment ready"})
     except Exception as exc:
-        await send({"status": "error", "message": str(exc)})
+        await _audit(request.app.ctx.db, user_id, None, "env_build_failed", ip, {"error": str(exc)})
+        await send({"status": "error", "message": "environment build failed"})
         await response.eof()
         return
 
