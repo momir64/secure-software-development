@@ -1,0 +1,14 @@
+{
+  "source_name": ["$userObj"],
+  "source_line": [5],
+  "source_column": [102],
+  "source_file": ["\/workspace\/admin\/import_user.php"],
+  "sink_name": "unserialize",
+  "sink_line": 7,
+  "sink_column": 183,
+  "sink_file": "\/workspace\/admin\/import_user.php",
+  "vuln_name": "code_injection",
+  "vuln_cwe": "CWE_95",
+  "vuln_id": "8fc9c5141674d34986c3ad4c55f46bbf0fca8b34d00e4e6ffe7a56d1faa06886",
+  "vuln_type": "taint-style"
+}
