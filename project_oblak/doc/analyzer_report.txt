@@ -1,0 +1,75 @@
+============================================================
+  ./cdk-cli/oblak.py
+  Verdict : SAFE  (MEDIUM confidence)
+  Summary : Suspicious patterns detected, manual review recommended.
+  SHA256  : 03cab3e50d5994db…
+  Elapsed : 0.016s
+
+  [✓] File validation: Valid Python source file (190 lines).
+  [✓] Antivirus (YARA): No malware signatures matched.
+  [⚠] Static analysis: 2 suspicious pattern(s) found. (bandit: yes)
+       • Line 73 [MEDIUM/LOW]: Call to requests without timeout
+       • Line 111 [MEDIUM/LOW]: Call to requests without timeout
+
+============================================================
+  ./oblak/deployer.py
+  Verdict : UNSAFE  (HIGH confidence)
+  Summary : Rejected: failed checks, Static analysis.
+  SHA256  : be5c8d9610048efe…
+  Elapsed : 0.014s
+
+  [✓] File validation: Valid Python source file (204 lines).
+  [⚠] Antivirus (YARA): 1 YARA rule(s) matched.
+       • [HIGH] OblakRuntimeInstall: Attempts to install packages at runtime (supply chain risk)
+  [✗] Static analysis: 47 suspicious pattern(s) found. (bandit: yes)
+       • Line 5: import of 'socket' (potentially dangerous)
+       • Line 50: call to 'subprocess.run()' (dangerous)
+       • Line 83: call to 'subprocess.run()' (dangerous)
+       • Line 85: call to 'subprocess.run()' (dangerous)
+       • Line 172: call to 'subprocess.run()' (dangerous)
+
+============================================================
+  ./oblak/firecracker/rootfs/runner.py
+  Verdict : UNSAFE  (HIGH confidence)
+  Summary : Rejected: failed checks, Static analysis.
+  SHA256  : e5575cd4e397ec81…
+  Elapsed : 0.009s
+
+  [✓] File validation: Valid Python source file (147 lines).
+  [✓] Antivirus (YARA): No malware signatures matched.
+  [✗] Static analysis: 6 suspicious pattern(s) found. (bandit: yes)
+       • Line 6: import of 'socket' (potentially dangerous)
+       • Line 37: call to 'subprocess.run()' (dangerous)
+       • Line 4 [LOW/HIGH]: Consider possible security implications associated with the subprocess module.
+       • Line 37 [LOW/HIGH]: subprocess call - check for execution of untrusted input.
+       • Line 100 [MEDIUM/MEDIUM]: Probable insecure usage of temp file/directory.
+
+============================================================
+  ./oblak/main.py
+  Verdict : SAFE  (MEDIUM confidence)
+  Summary : Suspicious patterns detected, manual review recommended.
+  SHA256  : 25a6da384c4fd923…
+  Elapsed : 0.016s
+
+  [✓] File validation: Valid Python source file (245 lines).
+  [✓] Antivirus (YARA): No malware signatures matched.
+  [⚠] Static analysis: 1 suspicious pattern(s) found. (bandit: yes)
+       • Line 245 [MEDIUM/MEDIUM]: Possible binding to all interfaces.
+
+============================================================
+  ./oblak/orchestrator.py
+  Verdict : UNSAFE  (HIGH confidence)
+  Summary : Rejected: failed checks, Static analysis.
+  SHA256  : c0483e6b5edbcd8e…
+  Elapsed : 0.027s
+
+  [✓] File validation: Valid Python source file (414 lines).
+  [✓] Antivirus (YARA): No malware signatures matched.
+  [✗] Static analysis: 57 suspicious pattern(s) found. (bandit: yes)
+       • Line 8: import of 'socket' (potentially dangerous)
+       • Line 89: call to 'subprocess.run()' (dangerous)
+       • Line 90: call to 'subprocess.run()' (dangerous)
+       • Line 98: call to 'subprocess.run()' (dangerous)
+       • Line 99: call to 'subprocess.run()' (dangerous)
+
+============================================================
