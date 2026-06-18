@@ -12,3 +12,4 @@ This directory contains test scenarios for validating all components of the code
 | [scenario_6](./scenario_6) | True | Safe scenario using hashing utilities only. |
 | [scenario_7](./scenario_7) | True | Safe scenario demonstrating local file access. |
 | [scenario_8](./scenario_8) | False | Malicious scenario that should trigger YARA rules. |
+| [scenario_9](./scenario_9) | False | Malicious scenario with broken `requirements.txt` file. |
