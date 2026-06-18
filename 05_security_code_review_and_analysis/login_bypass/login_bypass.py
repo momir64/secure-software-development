@@ -31,6 +31,7 @@ class LoginBypass:
 
                 if "User exists!" in resp.text:
                     token += char
+                    break
 
                 
         return token if token else None
