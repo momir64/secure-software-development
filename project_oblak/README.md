@@ -42,18 +42,17 @@ The platform is structured as a layered security stack. User-provided code is an
 ┌──────────────────────────────▼──────────────────────────────────┐
 │                     Oblak REST API (Sanic)                      │
 │   POST /auth/login  │  POST /lambdas  │  POST /lambdas/*/invoke │
-└──────────┬──────────────────┬─────────────────┬─────────────────┘
-           │                  │                  │
-      JWT Auth            Analyzer           Orchestrator
-      (bcrypt)            (4-layer)          (main.py)
-                              │                  │
-                   ┌──────────▼──────┐    ┌──────▼──────────────┐
-                   │  Code Analysis  │    │  VM Lifecycle Mgr   │
-                   │  - File check   │    │  - Snapshot hydrate │
-                   │  - YARA AV      │    │  - chroot/jailer    │
-                   │  - Bandit/AST   │    │  - netns + veth     │
-                   │  - Claude LLM   │    │  - cgroups          │
-                   └─────────────────┘    └──────┬──────────────┘
+└─────────┬─────────────────┬────────────────────────┬────────────┘
+          │                 │                        │
+      JWT Auth          Analyzer                 Orchestrator
+                            │                        │
+                   ┌────────▼────────┐     ┌─────────▼───────────┐
+                   │  Code Analysis  │     │  VM Lifecycle Mgr   │
+                   │  - File check   │     │  - Snapshot hydrate │
+                   │  - YARA AV      │     │  - chroot/jailer    │
+                   │  - Bandit/AST   │     │  - netns + veth     │
+                   │  - Claude LLM   │     │  - cgroups          │
+                   └─────────────────┘     └──────┬──────────────┘
                                                   │ vsock (AF_VSOCK)
                                    ┌──────────────▼───────────────┐
                                    │     Firecracker MicroVM      │
