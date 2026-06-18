@@ -5,32 +5,48 @@ Platform for executing user-provided Python code using Firecracker MicroVMs. Ins
 ## Repository Structure
 
 ```
-.
 ├── cdk-cli/                        # Command-line client
-│   ├── cli.py                      # CDK CLI script
+│   ├── oblak.py                    # CDK CLI script
 │   ├── oblak.cmd                   # Entry point wrapper (oblak <command>)
 │   └── requirements.txt
 └── oblak/                          # Server and orchestrator
     ├── firecracker/
     │   ├── rootfs/
-    │   │   └── Dockerfile          # Builds base.ext4
+    │   │   ├── Dockerfile          # Builds rootfs.ext4
+    │   │   ├── env_builder.sh      # Baked into rootfs; runs as PID 1 in env-builder VMs
+    │   │   └── runner.py           # Baked into rootfs; trusted runtime
+    │   ├── README.md               # Firecracker setup instructions
     │   ├── setup.ps1               # Automated Firecracker setup (Windows)
+    │   ├── setup.sh                # Automated Firecracker setup (Linux)
+    │   ├── snapshot.ps1            # Take base VM snapshot (Windows)
+    │   ├── snapshot.sh             # Take base VM snapshot (Linux)
     │   ├── test.ps1                # Test MicroVM boot (Windows)
-    │   └── README.md               # Firecracker setup instructions
+    │   └── test.sh                 # Test MicroVM boot (Linux)
     ├── resources/
+    │   ├── rootfs.ext4             # Base rootfs image
+    │   ├── stub.ext4               # Stub drive image used in base snapshot
     │   ├── vmlinux                 # Firecracker CI kernel
-    │   ├── base.ext4               # Base rootfs image
     │   └── snapshot/
     │       ├── mem.snap            # Frozen VM memory state
     │       └── vmstate             # Firecracker VM state
     ├── envs/
-    │   └── env-<hash>.ext4         # Per-requirements dependency layers
+    │   └── env_<hash>.ext4         # Per-requirements dependency layers
     ├── lambdas/
-    │   └── <lambda_id>/            # Deployed user scripts
+    │   └── <lambda_id>.ext4        # Deployed user scripts
     ├── config/
+    │   ├── init.sql                # DB schema and seed data
     │   └── vm.toml                 # VM resource configuration
+    ├── web_client/                 # Static frontend served by Sanic
+    │   ├── index.html
+    │   ├── script.js
+    │   └── styles.css
+    ├── analyzer.py                 # Code safety analysis
+    ├── deployer.py                 # Lambda deployment and environment building
+    ├── docker-compose.yml
     ├── main.py                     # Oblak entry point
-    └── requirements.txt
+    ├── orchestrator.py             # Orchestrator of MicroVMs lifecycle
+    ├── requirements.txt
+    └── vmlib.py                    # Shared Jailer/Firecracker and netns helpers
 ```
 
 ## Setting up Firecracker on Windows with WSL2
@@ -93,7 +109,7 @@ Input and output are plain strings. Input can be parsed as JSON or any other for
 
 ## REST API
 
-All endpoints except `POST /auth/login` require a JWT in the `Authorization: Bearer <token>` header.
+All endpoints except `POST /auth/login` and `POST /lambdas/<lambda_id>/invoke` require a JWT in the `Authorization: Bearer <token>` header.
 
 ### Authentication
 
@@ -127,10 +143,11 @@ Content-Type: multipart/form-data
 
 Returns a chunked response streaming deployment progress, for example:
 ```json
-{"status": "checking_environment"}
-{"status": "building_environment"}
-{"status": "environment_ready"}
-{"status": "storing_files"}
+{"status": "starting code analysis"}
+{"status": "checking environment"}
+{"status": "building environment"}
+{"status": "environment ready"}
+{"status": "storing files"}
 {"status": "done", "lambda_id": "<uuid>"}
 ```
 

@@ -50,7 +50,8 @@ infrastructure setup and are already complete — do not reimplement them.
     ├── docker-compose.yml
     ├── main.py                     # Oblak entry point
     ├── orchestrator.py             # Orchestrator of MicroVMs lifecycle
-    └── requirements.txt
+    ├── requirements.txt
+    └── vmlib.py                    # Shared Jailer/Firecracker and netns helpers
 ```
 
 ---
@@ -59,15 +60,19 @@ infrastructure setup and are already complete — do not reimplement them.
 
 ```toml
 [vm]
-vcpu_count = 1
-memory_mib = 128
-max_ip_slots = 128              # maximum number of concurrently running VMs
-lambda_size_mib = 10            # size of each lambda ext4 image
-env_size_mib = 256              # size of each env ext4 image
-idle_timeout_seconds = 300      # time since last invoke before VM is destroyed
-handler_timeout_seconds = 30    # max time main() can run before VM is killed
-cpu_period_us = 100000          # cgroup cpu.max period
-cpu_quota_us = 100000           # cgroup cpu.max quota (quota/period = max CPU fraction)
+vcpu_count = 1                      # lambda VM vCPU count
+memory_mib = 128                    # lambda VM memory
+max_ip_slots = 2048                 # maximum number of concurrently running lambda VMs
+env_vcpu_count = 4                  # env-builder VM vCPU count
+env_size_mib = 1024                 # size of each env ext4 image
+env_memory_mib = 512                # env-builder VM memory
+env_build_timeout_seconds = 600     # max time an env build VM may run before being killed
+max_env_build_slots = 4             # max concurrent env builds; further requests wait for a free slot
+lambda_size_mib = 10                # size of each lambda ext4 image
+idle_timeout_seconds = 300          # time since last invoke before VM is destroyed
+handler_timeout_seconds = 30        # max time main() can run before VM is killed
+cpu_period_us = 100000              # cgroup cpu.max period, shared by lambda and env-builder VMs
+cpu_quota_fraction = 1.0            # fraction of (vcpu_count * period) granted as quota; below 1.0 throttles below 100% per vCPU
 
 [rootfs]
 disk_size_mib = 512
@@ -231,32 +236,52 @@ fact that the runner holds the server socket file descriptor privately.
 
 ## Environment Layer Builder (`deployer.py`)
 
-Creates `env_<hash>.ext4` for a given `requirements.txt`. Exposed as `ensure_env(requirements) -> str | None` — returns the hash, or `None` if requirements is empty.
+Creates `env_<hash>.ext4` for a given `requirements.txt`. Exposed as `ensure_env(requirements) -> str | None` — returns the hash, or `None` if requirements is empty. Builds run jailed, the same way lambda VMs do, and up to `max_env_build_slots` can run concurrently; further requests block until a slot frees up.
 
 **Process:**
 1. Sort `requirements.txt` lines, compute SHA256 → `<hash>` (first 16 hex chars)
 2. Check if `envs/env_<hash>.ext4` already exists — if yes, return hash immediately
-3. Create a temp work directory under `envs/.build-<uuid>/`
-4. Package `requirements.txt` into `req.ext4` (4 MiB, no journal, `-O ^has_journal`) with `mkfs.ext4 -d`
-5. Create a blank `out.ext4` of `env_size_mib`
-6. Set up a TAP interface on the host (`tenv<random>`): assign `172.18.0.1/30`, bring it up, add an iptables MASQUERADE rule on `eth0`
-7. Start a Firecracker VM (no jailer, no namespace) with:
-   - drive `rootfs` — `rootfs.ext4`, root, read-only
-   - drive `req` — `req.ext4`, `/dev/vdb`, read-only
-   - drive `env` — `out.ext4`, `/dev/vdc`, read-write
-   - network interface on the tap above
-   - boot arg `init=/var/runtime/env_builder.sh`
-8. `env_builder.sh` runs as PID 1 inside the VM:
-   - Mounts `/dev/vdb` → `/var/task` (read-only)
-   - Mounts `/dev/vdc` → `/env` (read-write)
-   - Configures `eth0` to `172.18.0.2/30`, default route via `172.18.0.1`
+3. Acquire a build slot (blocks if all `max_env_build_slots` are in use)
+4. Create a temp work directory under `envs/.build-<uuid>/`, package `requirements.txt` into `req.ext4` (4 MiB, no journal, `-O ^has_journal`) with `mkfs.ext4 -d`
+5. Prepare a per-build chroot under `/srv/jailer/firecracker/<vm_id>/root/`, hard-linking `rootfs.ext4` and `vmlinux` into `resources/`, then create `req.ext4` and a blank `env.ext4` (sized `env_size_mib`) directly inside `resources/`
+6. Bring up the slot's network namespace (`envb{N}`) with a `tap0` inside it and a veth pair (`veth-eh{N}` / `veth-en{N}`) connecting it to the host — the same mechanism lambda VMs use, on a separate `172.18`/`172.19` IP range so the two slot pools can never collide
+7. Start Jailer with `--netns /var/run/netns/envb{N}`, uid/gid dropped to the jailer user, and cgroup v2 limits (`memory.max`, `cpu.max`) derived from `env_memory_mib` / `env_vcpu_count` / `cpu_quota_fraction`
+8. Configure the Firecracker VM via the API:
+   - drive `rootfs` — `resources/rootfs.ext4`, root, read-only
+   - drive `req` — `resources/req.ext4`, `/dev/vdb`, read-only
+   - drive `env` — `resources/env.ext4`, `/dev/vdc`, read-write
+   - network interface on `tap0`
+   - boot args carry the slot's guest IP and gateway (`env_ip=... env_gw=...`) alongside `init=/var/runtime/env_builder.sh`
+9. `env_builder.sh` runs as PID 1 inside the VM:
+   - Mounts `/dev/vdb` → `/var/task` (read-only), `/dev/vdc` → `/env` (read-write)
+   - Reads `env_ip`/`env_gw` from `/proc/cmdline` and configures `eth0` accordingly
    - Runs `uv pip install --no-cache --system --target /env -r /var/task/requirements.txt`
    - Unmounts `/env`, then calls `reboot -f`
-9. Wait for the Firecracker process to exit (up to `env_build_timeout_seconds`, default 600 s)
-10. Rename `out.ext4` → `envs/env_<hash>.ext4`
-11. Cleanup: remove iptables rule, delete tap, remove work directory
+10. Wait for the Firecracker process to exit (up to `env_build_timeout_seconds`, default 600 s)
+11. Copy `resources/env.ext4` → `envs/env_<hash>.ext4`
+12. Cleanup: kill the process if it's still running, tear down the namespace and veth pair, delete the chroot directory, release the build slot, remove the work directory
 
 `deploy_lambda(lambda_id, script_dir)` packages a script directory into `lambdas/<lambda_id>.ext4` using `mkfs.ext4 -d` and sets ownership to the jailer uid/gid.
+
+If the build fails, `main.py` logs the underlying error to `audit_logs` (`env_build_failed`) and returns a generic `"environment build failed"` message to the client rather than the raw exception.
+
+---
+
+## Shared VM Helpers (`vmlib.py`)
+
+Functions shared by `orchestrator.py` and `deployer.py` for everything that talks to Jailer/Firecracker or sets up networking, so the two don't duplicate the same subprocess/HTTP plumbing:
+
+- `jailer_ids()` — resolve the `firecracker-jailer` uid/gid
+- `fc(sock_path, method, path, body)` — Firecracker API call over the chroot's Unix socket
+- `wait_path(path, timeout)` — poll until a file/socket appears
+- `link_or_copy(src, dst)` — hard-link into the chroot, falling back to a copy across filesystems
+- `slot_ips(prefix, slot)` — compute a slot's /30 IP pair for a given subnet prefix
+- `slot_name(slot, env_builder=False)` — netns name (`vm{N}` or `envb{N}`)
+- `veth_names(slot, env_builder=False)` — veth pair names (`veth-h{N}`/`veth-n{N}` or `veth-eh{N}`/`veth-en{N}`)
+- `netns_up(...)` / `netns_down(slot, env_builder=False)` — create/tear down a slot's namespace, tap, and veth pair
+- `slot_up(veth_h, veth_n, vm_prefix, veth_prefix, slot, jailer_uid, env_builder=False)` — computes both IP pairs and brings the namespace up in one call
+
+The `env_builder` flag is what lets the same functions serve both VM types with different naming/IP schemes, without either module reimplementing the netns/veth logic itself.
 
 ---
 
@@ -301,7 +326,7 @@ Creates `env_<hash>.ext4` for a given `requirements.txt`. Exposed as `ensure_env
 
 ### VM Networking
 
-Each VM gets a dedicated network namespace (`vm{N}`) containing:
+Each lambda VM gets a dedicated network namespace (`vm{N}`) containing:
 - `tap0` — TAP device Firecracker connects the guest's `eth0` to; has the host-side IP of the /30 subnet
 - `lo` — loopback, brought up
 - `veth-n{N}` — one end of a veth pair moved into the namespace; has the namespace-side IP of a second /30 subnet; default route via `veth-h{N}`
@@ -313,9 +338,19 @@ IP allocation uses two /30 subnets per slot `N`:
 - VM subnet: `172.16.{N*4>>8}.{(N*4)&0xff}/30` — tap0 (host-side) ↔ eth0 (guest)
 - Veth subnet: `172.17.{N*4>>8}.{(N*4)&0xff}/30` — veth-h{N} (host) ↔ veth-n{N} (namespace)
 
-Global iptables rules (installed once at startup, removed at shutdown):
+Env-builder VMs use the identical scheme, on a separate slot pool and IP range so it can
+never collide with the lambda VM pool even when both run at full concurrency:
+- Namespace: `envb{N}`, with `tap0`, `veth-eh{N}` / `veth-en{N}` in place of `vm{N}`'s `tap0` / `veth-h{N}` / `veth-n{N}`
+- VM subnet: `172.18.{N*4>>8}.{(N*4)&0xff}/30`
+- Veth subnet: `172.19.{N*4>>8}.{(N*4)&0xff}/30`
+
+Global iptables rules (installed once at orchestrator startup, removed at shutdown):
 - `nat POSTROUTING`: masquerade all traffic from `172.16.0.0/12` not destined for `172.16.0.0/12`
 - `filter FORWARD`: accept traffic from and to `172.16.0.0/12`
+
+The `/12` range covers `172.16.0.0`–`172.31.255.255`, so it transparently covers the
+env-builder's `172.18`/`172.19` subnets too — `deployer.py` relies on `orchestrator.startup()`
+having installed these rules before any env build runs.
 
 IP forwarding is enabled on orchestrator startup (`net.ipv4.ip_forward=1`).
 
