@@ -1248,7 +1248,7 @@ Results can be found in [doc/analyzer_report.txt](doc/analyzer_report.txt).
 
 <img src="doc/threatmodel.png" alt="Threat Model"/>
 
-[json](doc/threatmodel.json)
+[Threat Dragon format (json)](doc/threatmodel.json)
 
 ---
 
