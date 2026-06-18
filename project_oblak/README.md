@@ -991,7 +991,7 @@ The assessment identified a limited set of realistic security issues that primar
 | Severity | Count |
 |----------|-------|
 | Critical | 0 |
-| High | 5 |
+| High | 7 |
 | Medium | 4 |
 | Low | 2 |
 | Informational | 2 |
@@ -1182,6 +1182,50 @@ A theoretical path traversal scenario could exist if trusted deployment metadata
 
 ---
 
+#### THREAT-12 — Credential File Replay
+
+**Severity:** High  
+**STRIDE:** S-1
+
+A stolen local credential file can allow an attacker to impersonate a valid user account.
+
+**Observed Implementation:** The CDK CLI stores credentials in a plaintext JSON file containing a long-lived JWT token. If the file is compromised, the attacker can reuse the token to authenticate as the original user.
+
+**Mitigation:** Protect the credential file with restrictive filesystem permissions, reduce token lifetime, and consider encrypted credential storage or refresh-token based authentication.
+
+#### THREAT-13 — Vsock Impersonation
+
+**Severity:** Medium  
+**STRIDE:** S-2
+
+The vsock communication channel does not provide built-in authentication, allowing a process with access to the communication endpoint to potentially issue unauthorized commands.
+
+**Observed Implementation:** Vsock handshake validation does not authenticate the communicating party. Any process able to access the vsock endpoint inside the isolated environment could attempt to send setup or invocation requests.
+
+**Mitigation:** Network namespace isolation and restrictive chroot filesystem permissions limit access to the vsock endpoint.
+
+#### THREAT-14 — Malicious requirements.txt Execution
+
+**Severity:** High  
+**STRIDE:** T-1
+
+User-controlled dependency installation may execute arbitrary package installation logic during environment creation.
+
+**Observed Implementation:** The deployer installs user-provided dependencies using `uv pip install`. A compromised dependency or package containing custom build hooks could execute code during the environment build process.
+
+**Mitigation:** Run environment builders inside isolated Jailer-protected Firecracker VMs and consider dependency allowlisting or package verification.
+
+#### THREAT-15 — Audit Log Integrity
+
+**Severity:** Medium  
+**STRIDE:** R-2
+
+Audit records can potentially be modified or removed, reducing confidence in forensic investigations.
+
+**Observed Implementation:** Audit records are stored as mutable PostgreSQL rows without append-only guarantees, signing, or external log shipping.
+
+**Mitigation:** Forward audit events to append-only storage or an external logging system and apply additional integrity controls.
+
 ### 18.4. Static Analysis Review
 
 Code was review using out own [analyser.py](oblak/analyzer.py) tool, which implements a four-layer analysis pipeline:
@@ -1212,16 +1256,17 @@ Results can be found in [doc/analyzer_report.txt](doc/analyzer_report.txt).
 
 | Priority | ID | Action |
 |----------|----|--------|
-| P1 | THREAT-01 | Apply runtime-equivalent isolation to environment builder |
-| P1 | THREAT-02 | Strengthen alias and dynamic-import detection |
-| P1 | THREAT-03 | Introduce endpoint rate limiting |
-| P1 | THREAT-04 | Sanitize client-facing error responses |
-| P1 | THREAT-05 | Enforce upload limits |
-| P2 | THREAT-06 | Improve invocation attribution |
-| P2 | THREAT-07 | Revise analyzer aggregation logic |
-| P2 | THREAT-08 | Add security headers |
-| P2 | THREAT-09 | Introduce archival lifecycle management |
-| P3 | THREAT-10 | Encourage secure CLI credential handling |
-| P3 | THREAT-11 | Add filename validation safeguards |
+| P1 | T-2 | Strengthen alias and dynamic-import detection |
+| P1 | D-1 | Introduce endpoint rate limiting |
+| P1 | T-1 | Restrict dependency installation and strengthen environment build validation |
+| P2 | I-1 | Maintain sanitized client-facing error responses and server-side audit logging |
+| P2 | E-2 | Revise analyzer aggregation logic |
+| P2 | R-1 | Improve invocation attribution |
+| P2 | R-2 | Introduce append-only audit logging and integrity protection |
+| P2 | I-2 | Add security headers |
+| P2 | D-3 | Introduce archival lifecycle management |
+| P2 | S-1 | Improve credential storage and token lifecycle management |
+| P3 | S-2 | Further harden vsock endpoint access controls |
+| P3 | T-3 | Add filename validation safeguards |
 
 ---
