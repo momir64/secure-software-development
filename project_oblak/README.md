@@ -124,6 +124,7 @@ The platform relies on two background services managed with Docker Compose:
     ├── docker-compose.yml
     ├── main.py                     # Oblak entry point
     ├── orchestrator.py             # Orchestrator of MicroVMs lifecycle
+    ├── vmlib.py                    # Shared Jailer/Firecracker and netns helpers
     └── requirements.txt
 ```
 
@@ -186,10 +187,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin s
 RUN mkdir -p /var/runtime /var/task /env
 
 COPY runner.py /var/runtime/runner.py
-RUN chmod 544 /var/runtime/runner.py
+RUN sed -i 's/\r$//' /var/runtime/runner.py && chmod 544 /var/runtime/runner.py
 
 COPY env_builder.sh /var/runtime/env_builder.sh
-RUN chmod 544 /var/runtime/env_builder.sh
+RUN sed -i 's/\r$//' /var/runtime/env_builder.sh && chmod 544 /var/runtime/env_builder.sh
 ```
 
 The resulting filesystem is exported and packed into `resources/rootfs.ext4`, a single virtual disk file that acts as the read-only root drive for every MicroVM.
@@ -729,7 +730,7 @@ User (CDK CLI / Web UI)
 │  1. Lookup lambda in DB (verify not deleted)                    │
 │  2. orchestrator.invoke(lambda_id, script, input, env_hash)     │
 │     a. Check _warm dict for existing VM                         │
-│     b. Cold start if needed (see Section 9)                     │
+│     b. Cold start if needed (see Section 8)                     │
 │     c. Send invocation payload over vsock                       │
 │     d. Receive {"output": ..., "stderr": ..., "exit_code": ...} │
 │     e. Reset idle timer                                         │
@@ -740,13 +741,13 @@ User (CDK CLI / Web UI)
 
 ### Environment Builder VM
 
-1. Creates `req.ext4` containing the sorted `requirements.txt`.
-2. Creates a blank `out.ext4` of `env_size_mib` bytes.
-3. Sets up a temporary TAP interface (`tenv<random>`) on the host with `172.18.0.1/30` and a temporary iptables MASQUERADE rule.
+1. Creates `req.ext4` containing the original `requirements.txt`.
+2. Creates a blank `env.ext4` of `env_size_mib` bytes.
+3. Creates a dedicated network namespace with a TAP device and veth pair, assigning IPs from the `172.18.x.x/30` (tap) and `172.19.x.x/30` (veth) subnet ranges. A NAT MASQUERADE rule is installed inside the namespace so the VM can reach the internet.
 4. Boots a Firecracker VM with `init=/var/runtime/env_builder.sh`.
 5. `env_builder.sh` (running as PID 1) mounts the req and out drives, configures the network, runs `uv pip install --no-cache --system --target /env -r /var/task/requirements.txt`, unmounts `/env`, and calls `reboot -f`.
 6. The orchestrator waits for the Firecracker process to exit (up to 600 seconds).
-7. `out.ext4` is atomically renamed to `envs/env_<hash>.ext4`.
+7. `env.ext4` is copied to `envs/env_<hash>.ext4`.
 8. The TAP device, iptables rule, and temporary directory are cleaned up.
 
 ---
@@ -920,19 +921,26 @@ All runtime parameters are read from `config/vm.toml`:
 [vm]
 vcpu_count              = 1       # vCPUs per MicroVM
 memory_mib              = 128     # RAM per MicroVM (MiB)
-max_ip_slots            = 128     # maximum concurrently running VMs
+max_ip_slots            = 2048    # maximum concurrently running VMs
 lambda_size_mib         = 10      # size of each lambda ext4 image
 idle_timeout_seconds    = 300     # VM destroyed after N seconds of inactivity
 handler_timeout_seconds = 30      # max execution time before VM is killed
 cpu_period_us           = 100000  # cgroup cpu.max period (microseconds)
-cpu_quota_us            = 100000  # cgroup cpu.max quota (quota/period = CPU fraction)
-                                  # 100000/100000 = 1.0 = exactly 1 vCPU
+cpu_quota_fraction      = 1.0     # fraction of one vCPU allowed per period
+                                  # quota_us = vcpu_count * period_us * fraction
+                                  # 1 * 100000 * 1.0 = 100000 → exactly 1 vCPU
+
+env_vcpu_count          = 4       # vCPUs for env-builder VMs
+env_memory_mib          = 512     # RAM for env-builder VMs (MiB)
+env_size_mib            = 1024    # size of each env ext4 image
+env_build_timeout_seconds = 600   # max time for pip install before VM is killed
+max_env_build_slots     = 4       # max concurrent env builds
 
 [rootfs]
 disk_size_mib           = 512     # size of rootfs.ext4
 ```
 
-The `cpu_quota_us / cpu_period_us` ratio defines the maximum CPU fraction. With both at 100000 (the default), each VM is hard-capped at exactly one full CPU core, regardless of host load.
+The `cpu_quota_fraction * vcpu_count * cpu_period_us` product defines the cgroup `cpu.max` quota. With `cpu_quota_fraction = 1.0` and `vcpu_count = 1`, each VM is hard-capped at exactly one full CPU core, regardless of host load.
 
 ---
 
