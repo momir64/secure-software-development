@@ -1,8 +1,10 @@
 from pathlib import Path
 import subprocess
+import threading
 import hashlib
 import tomllib
-import socket
+import shutil
+import vmlib
 import time
 import uuid
 import os
@@ -14,6 +16,7 @@ _RESOURCES = _BASE / "resources"
 _ROOTFS = _RESOURCES / "rootfs.ext4"
 _ENVS = _BASE / "envs"
 _LAMBDAS = _BASE / "lambdas"
+_CHROOT_BASE = Path("/srv/jailer")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -25,9 +28,33 @@ _VCPU = _cfg["vm"]["env_vcpu_count"]
 _LAMBDA_SIZE_MIB = _cfg["vm"]["lambda_size_mib"]
 _ENV_SIZE_MIB = _cfg["vm"].get("env_size_mib", 256)
 _ENV_BUILD_TIMEOUT = _cfg["vm"].get("env_build_timeout_seconds", 600)
+_MAX_ENV_SLOTS = _cfg["vm"].get("max_env_build_slots", 4)
+_CPU_PERIOD_US = _cfg["vm"].get("cpu_period_us", 100000)
+_CPU_QUOTA_FRACTION = _cfg["vm"].get("cpu_quota_fraction", 1.0)
+_CPU_QUOTA_US = int(_VCPU * _CPU_PERIOD_US * _CPU_QUOTA_FRACTION)
 
-_JAILER_UID = int(subprocess.check_output(["id", "-u", "firecracker-jailer"]).strip())
-_JAILER_GID = int(subprocess.check_output(["id", "-g", "firecracker-jailer"]).strip())
+_JAILER_UID, _JAILER_GID = vmlib.jailer_ids()
+
+# ── Build slot pool ───────────────────────────────────────────────────────────
+# Slot N gets two /30 subnets:
+#   tap subnet   172.18.{N*4>>8}.{N*4&0xff}/30  — tap0 (host) ↔ eth0 (guest)
+#   veth pair    172.19.{N*4>>8}.{N*4&0xff}/30  — veth-eh{N} (host) ↔ veth-en{N} (namespace)
+
+_available_env_slots: list[int] = list(range(_MAX_ENV_SLOTS))
+_env_slot_cv = threading.Condition()
+
+
+def _acquire_env_slot() -> int:
+    with _env_slot_cv:
+        while not _available_env_slots:
+            _env_slot_cv.wait()
+        return _available_env_slots.pop(0)
+
+
+def _release_env_slot(slot: int) -> None:
+    with _env_slot_cv:
+        _available_env_slots.append(slot)
+        _env_slot_cv.notify()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -51,73 +78,62 @@ def _wait_exit(pid: int, timeout: float = _ENV_BUILD_TIMEOUT) -> None:
     raise TimeoutError("env builder VM did not exit in time")
 
 
-def _fc(sock_path: str, method: str, path: str, body: dict | None = None) -> None:
-    import http.client, json
-
-    class _UnixHTTP(http.client.HTTPConnection):
-        def connect(self):
-            self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            self.sock.connect(sock_path)
-
-    conn = _UnixHTTP("localhost")
-    data = json.dumps(body).encode() if body is not None else None
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    conn.request(method, path, body=data, headers=headers)
-    resp = conn.getresponse()
-    resp_body = resp.read()
-    conn.close()
-    if resp.status >= 300:
-        raise RuntimeError(f"Firecracker {method} {path} → {resp.status}: {resp_body.decode()}")
-
-
-def _wait_sock(path: str, timeout: float = 15.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if os.path.exists(path):
-            return
-        time.sleep(0.1)
-    raise TimeoutError(f"socket did not appear: {path}")
-
-
 def _make_ext4(path: Path, size_mib: int, src_dir: Path | None = None, extra_opts: list[str] | None = None, capture_output: bool = False) -> None:
     subprocess.run(["truncate", "-s", f"{size_mib}M", str(path)], check=True)
     cmd = ["mkfs.ext4", "-q", *(extra_opts or []), *(["-d", str(src_dir)] if src_dir else []), "-F", str(path)]
     subprocess.run(cmd, check=True, capture_output=capture_output)
 
 
-def _configure_fc_vm(fc_sock: str, req_image: Path, out_image: Path, tap: str) -> None:
-    _fc(fc_sock, "PUT", "/machine-config", {
+def _prepare_env_chroot(vm_id: str) -> Path:
+    chroot = _CHROOT_BASE / "firecracker" / vm_id / "root"
+    res = chroot / "resources"
+    res.mkdir(parents=True, exist_ok=True)
+    (chroot / "run").mkdir(exist_ok=True)
+
+    vmlib.link_or_copy(_ROOTFS, res / "rootfs.ext4")
+    vmlib.link_or_copy(_RESOURCES / "vmlinux", res / "vmlinux")
+
+    for d in (chroot, res, chroot / "run"):
+        os.chown(d, _JAILER_UID, _JAILER_GID)
+    for f in res.iterdir():
+        os.chown(f, _JAILER_UID, _JAILER_GID)
+
+    return chroot
+
+
+def _configure_fc_vm(fc_sock: str, guest_ip: str, host_ip: str) -> None:
+    vmlib.fc(fc_sock, "PUT", "/machine-config", {
         "vcpu_count": _VCPU,
         "mem_size_mib": _MEM,
     })
-    _fc(fc_sock, "PUT", "/boot-source", {
-        "kernel_image_path": str(_RESOURCES / "vmlinux"),
-        "boot_args": "console=ttyS0 reboot=k panic=1 pci=off init=/var/runtime/env_builder.sh",
+    vmlib.fc(fc_sock, "PUT", "/boot-source", {
+        "kernel_image_path": "resources/vmlinux",
+        "boot_args": f"console=ttyS0 reboot=k panic=1 pci=off env_ip={guest_ip}/30 env_gw={host_ip} init=/var/runtime/env_builder.sh",
     })
-    _fc(fc_sock, "PUT", "/drives/rootfs", {
+    vmlib.fc(fc_sock, "PUT", "/drives/rootfs", {
         "drive_id": "rootfs",
-        "path_on_host": str(_ROOTFS),
+        "path_on_host": "resources/rootfs.ext4",
         "is_root_device": True,
         "is_read_only": True,
     })
-    _fc(fc_sock, "PUT", "/drives/req", {
+    vmlib.fc(fc_sock, "PUT", "/drives/req", {
         "drive_id": "req",
-        "path_on_host": str(req_image),
+        "path_on_host": "resources/req.ext4",
         "is_root_device": False,
         "is_read_only": True,
     })
-    _fc(fc_sock, "PUT", "/drives/env", {
+    vmlib.fc(fc_sock, "PUT", "/drives/env", {
         "drive_id": "env",
-        "path_on_host": str(out_image),
+        "path_on_host": "resources/env.ext4",
         "is_root_device": False,
         "is_read_only": False,
     })
-    _fc(fc_sock, "PUT", "/network-interfaces/eth0", {
+    vmlib.fc(fc_sock, "PUT", "/network-interfaces/eth0", {
         "iface_id": "eth0",
-        "host_dev_name": tap,
+        "host_dev_name": "tap0",
         "guest_mac": "AA:FC:00:00:00:02",
     })
-    _fc(fc_sock, "PUT", "/actions", {"action_type": "InstanceStart"})
+    vmlib.fc(fc_sock, "PUT", "/actions", {"action_type": "InstanceStart"})
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -152,53 +168,78 @@ def ensure_env(requirements: str) -> str | None:
 
     _ENVS.mkdir(exist_ok=True)
 
+    vm_id = str(uuid.uuid4())
     work_dir = _ENVS / f".build-{uuid.uuid4().hex}"
     work_dir.mkdir()
-
-    req_image = work_dir / "req.ext4"
-    out_image = work_dir / "env.ext4"
-    fc_sock = Path(f"/tmp/oblak-fc-{uuid.uuid4().hex}.sock")
     req_dir = work_dir / "req"
     req_dir.mkdir()
 
     process = None
-    tap = f"tenv{uuid.uuid4().hex[:7]}"
+    chroot = None
+    ns_created = False
+    slot = _acquire_env_slot()
 
     try:
         (req_dir / "requirements.txt").write_text(requirements)
-        _make_ext4(req_image, 4, src_dir=req_dir, extra_opts=["-O", "^has_journal"])
-        _make_ext4(out_image, _ENV_SIZE_MIB)
 
-        subprocess.run(["ip", "tuntap", "add", "dev", tap, "mode", "tap"], check=True)
-        subprocess.run(["ip", "addr", "add", "172.18.0.1/30", "dev", tap], check=True)
-        subprocess.run(["ip", "link", "set", tap, "up"], check=True)
-        subprocess.run(["iptables", "-t", "nat", "-I", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"], check=True)
+        chroot = _prepare_env_chroot(vm_id)
+        res = chroot / "resources"
 
-        with open(work_dir / "fc.log", "w") as log_fh:
+        _make_ext4(res / "req.ext4", 4, src_dir=req_dir, extra_opts=["-O", "^has_journal"])
+        _make_ext4(res / "env.ext4", _ENV_SIZE_MIB)
+        for f in (res / "req.ext4", res / "env.ext4"):
+            os.chown(f, _JAILER_UID, _JAILER_GID)
+
+        veth_h, veth_n = vmlib.veth_names(slot, True)
+        host_ip, guest_ip = vmlib.slot_up(veth_h, veth_n, "172.18", "172.19", slot, _JAILER_UID, True)
+        ns_created = True
+
+        fc_sock = str(chroot / "run" / "fc.sock")
+        log_path = work_dir / "fc.log"
+
+        with open(log_path, "w") as log_fh:
             process = subprocess.Popen(
-                ["firecracker", "--api-sock", str(fc_sock)],
+                [
+                    "jailer",
+                    "--id", vm_id,
+                    "--exec-file", "/usr/local/bin/firecracker",
+                    "--uid", str(_JAILER_UID),
+                    "--gid", str(_JAILER_GID),
+                    "--chroot-base-dir", str(_CHROOT_BASE),
+                    "--netns", f"/var/run/netns/{vmlib.slot_name(slot, True)}",
+                    "--resource-limit", "no-file=2048",
+                    "--resource-limit", f"fsize={_ENV_SIZE_MIB * 1024 * 1024}",
+                    "--cgroup-version", "2",
+                    "--cgroup", f"memory.max={_MEM * 1024 * 1024}",
+                    "--cgroup", f"cpu.max={_CPU_QUOTA_US} {_CPU_PERIOD_US}",
+                    "--",
+                    "--api-sock", "run/fc.sock",
+                ],
                 stdout=log_fh,
                 stderr=log_fh,
             )
 
-        _wait_sock(str(fc_sock))
-        _configure_fc_vm(str(fc_sock), req_image, out_image, tap)
+        vmlib.wait_path(fc_sock)
+        _configure_fc_vm(fc_sock, guest_ip, host_ip)
         _wait_exit(process.pid)
         process = None
 
-        result = subprocess.run(["debugfs", "-R", "ls /", str(out_image)], capture_output=True, text=True)
+        result = subprocess.run(["debugfs", "-R", "ls /", str(res / "env.ext4")], capture_output=True, text=True)
         if ".__build_ok__" not in result.stdout:
-            log_contents = (work_dir / "fc.log").read_text() if (work_dir / "fc.log").exists() else "no log"
+            log_contents = log_path.read_text() if log_path.exists() else "no log"
             raise RuntimeError(f"env build failed: pip install failed\n{log_contents}")
 
-        out_image.rename(env_image)
+        shutil.copy2(res / "env.ext4", env_image)
+        os.chmod(env_image, 0o644)
         return hash_
 
     finally:
         if process is not None:
             process.kill()
             process.wait()
-        subprocess.run(["iptables", "-t", "nat", "-D", "POSTROUTING", "-o", "eth0", "-j", "MASQUERADE"], check=False)
-        subprocess.run(["ip", "link", "del", tap], check=False)
-        fc_sock.unlink(missing_ok=True)
+        if ns_created:
+            vmlib.netns_down(slot, True)
+        if chroot:
+            subprocess.run(["rm", "-rf", str(chroot.parent)], check=False)
+        _release_env_slot(slot)
         subprocess.run(["rm", "-rf", str(work_dir)], check=False)
