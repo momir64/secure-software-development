@@ -60,11 +60,9 @@ Opening that commit revealed a file named `csicrf.txt`.
 
 ---
 
-### 5. Extracting the flag
+### 5. Extracting the (false) flag
 
-Inside the `csicrf.txt` file there was a hidden message.
-
-The important part was found in the comments:
+In the GitHub repository, the `csicrf.txt` file contained a comment:
 
 ```text
 flag{d0_osint_c4n_b3_d1ff1cult}
@@ -74,10 +72,26 @@ flag{d0_osint_c4n_b3_d1ff1cult}
 
 ---
 
+### 6. Finding the real flag
+
+The real flag was found in git history using the command:
+
+```bash
+git log -S "csictf" --all -p
+```
+
+![Git log search](img/06.png)
+
+Flag was found in .env file in the commit history.
+
+```text
+csictf{sc4r3d_0f_c0mm1tm3nt}
+```
+
 ## Flag
 
 ```text
-csictf{d0_osint_c4n_b3_d1ff1cult}
+csictf{sc4r3d_0f_c0mm1tm3nt}
 ```
 
 ---
