@@ -1,8 +1,11 @@
-# Pixel Perfect
+# Reconnaissance
 
 ## Challenge Description
 
-**Flag format:** attacker's email and full real name **Provided:** `SakuraSnowAngelAiko` username from previous step  
+**Answers needed:** 
+* attacker's email 
+* attacker's full real name 
+**Provided:** `SakuraSnowAngelAiko` username from previous step  
 **Hint:** It appears that our attacker made a fatal mistake in their operational security. They seem to have reused their username across other social media platforms as well. This
 should make it far easier for us to gather additional information on them by locating their other social media accounts.
 
