@@ -4,7 +4,6 @@
 
 **Flag format:** UNS{XX.XXXXXXX,XX.XXXXXXX}  
 **Provided:** [`image.jpg`](image.jpg)  
-**Hint:** Your friend received a very strange email. Since he knows you understand computers, he sent you the email's content and asked you to check if that email has any meaning or it's just another spam?  
 
 ---
 
@@ -14,7 +13,7 @@
 
 ![img.png](img/img1.png)
 
-Found out that it's and image of Zaovinsko jezero. By Google watermark at the bottom of the image as well as high elevation view, it's most likely someone's private 360 image uploaded to Google Streets View.
+Found out that it's an image of Zaovinsko jezero. By Google watermark at the bottom of the image as well as high elevation view, it's most likely someone's private 360 image uploaded to Google Streets View.
 
 ---
 
